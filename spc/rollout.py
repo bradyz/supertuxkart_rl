@@ -1,18 +1,13 @@
-from typing import Tuple, Dict, Set
-
-import numpy as np
-import ray
-
+import time
 import pystk
-
+from typing import Tuple, Dict, Set
 from . import controller, policy
+import ray
 from .track_map import Map, colored_map
+import numpy as np
 
 
 class Reward:
-    def __init__(self):
-        pass
-
     def __call__(self, track_map):
         return track_map[:, :, 1] + track_map[:, :, 2] / 50.
 
@@ -64,25 +59,21 @@ class Rollout(object):
     def __init__(self, config: pystk.GraphicsConfig = None):
         if config is None:
             config = pystk.GraphicsConfig.ld()
-            config.screen_width = 200
-            config.screen_height = 150
+            config.screen_width = 64
+            config.screen_height = 64
+
         pystk.init(config)
+
         self.config = None
         self.race = None
         self.track = None
         self.map = None
 
-    def __del__(self):
-        if self.race is not None:
-            self.race.stop()
-            del self.race
-        pystk.clean()
-
     def start(self, config: pystk.RaceConfig = None, map_config: Dict = dict(world_size=(50, 50), max_offset=50)):
         if config is None:
             config = pystk.RaceConfig()
             config.players[0].controller = pystk.PlayerConfig.Controller.PLAYER_CONTROL
-            config.track = "lighthouse"
+            config.track = np.random.choice(["lighthouse", "zengarden"])
             # config.track = "zengarden"
             config.step_size = 0.1
 
@@ -152,6 +143,13 @@ class Rollout(object):
             result.append(Data(action=a, image=i, map=m, state=s, track=t))
         return result
 
+    def __del__(self):
+        if self.race is not None:
+            self.race.stop()
+            del self.race
+
+        pystk.clean()
+
 
 @ray.remote
 class RayRollout(Rollout):
@@ -161,19 +159,24 @@ class RayRollout(Rollout):
 if __name__ == "__main__":
     ray.init(logging_level=40)  # logging.ERROR
 
-    rollout = RayRollout.remote()
+    rollouts = [RayRollout.remote() for _ in range(8)]
     # rollout.start()
-    ray.get(rollout.start.remote())
+    for rollout in rollouts:
+        ray.get(rollout.start.remote())
 
-    ro = rollout.rollout.remote(
-            policy.RewardPolicy(Reward()), controller.TuxController(),
-            return_data={'image', 'map', 'state', 'track'},
-            max_step=1000)
-    ro = ray.get(ro)
+    tick = time.time()
 
-    viz = TrackViz(ro[0].track)
-    import pdb; pdb.set_trace()
+    ros = [rollout.rollout.remote(policy.RewardPolicy(Reward()), controller.TuxController(), return_data={'image', 'map', 'state', 'track'}, max_step=100) for rollout in rollouts]
 
-    for a, i, m, s, t in ro:
-        viz.plot(s.karts[0], i)
+    ros = [ray.get(ro) for ro in ros]
 
+    clock = time.time() - tick
+
+    print(clock)
+    print(sum(map(len, ros)) / clock)
+
+    for j in range(len(ros)):
+
+        viz = TrackViz(ros[j][0].track)
+        for a, i, m, s, t in ros[j]:
+            viz.plot(s.karts[0], i)

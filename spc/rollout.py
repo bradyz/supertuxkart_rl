@@ -1,15 +1,25 @@
 import time
+
+from typing import Dict, Set
+
 import pystk
-from typing import Tuple, Dict, Set
-from . import controller, policy
 import ray
-from .track_map import Map, colored_map
 import numpy as np
+
+from . import controller, policy
+from .track_map import Map
+from .replay_buffer import ReplayBuffer, Data
 
 
 class Reward:
     def __call__(self, track_map):
         return track_map[:, :, 1] + track_map[:, :, 2] / 50.
+
+
+def action_to_numpy(action):
+    return np.float32([
+        action.steer, action.acceleration, action.brake,
+        action.drift, action.nitro])
 
 
 class TrackViz:
@@ -50,9 +60,9 @@ class TrackViz:
         self.fig.canvas.draw()
         pause(1e-3)
 
-    def update(self, kart_info, target, action, I=None):
+    def update(self, kart_info, target, action, image=None):
         self.silent_update(kart_info, target, action)
-        self.plot(kart_info, I)
+        self.plot(kart_info, image)
 
 
 class Rollout(object):
@@ -77,9 +87,7 @@ class Rollout(object):
             # config.track = "zengarden"
             config.step_size = 0.1
 
-        if self.race is not None:
-            self.race.stop()
-            del self.race
+        self.stop()
 
         self.config = config
 
@@ -94,6 +102,7 @@ class Rollout(object):
     def stop(self):
         if self.race is not None:
             self.race.stop()
+
             del self.race
 
         self.config = None
@@ -101,52 +110,49 @@ class Rollout(object):
         self.track = None
         self.map = None
 
-    def rollout(self, p: policy.BasePolicy, c: controller.BaseController, max_step: float = 100, restart: bool = True,
-                return_data: Set[str] = {}):
-        """
-        :param return_data: what data should we return? 'action', 'image', 'map', 'state', 'track'
-        :return:
-        """
-        import collections
-        Data = collections.namedtuple('Data', 'action image map state track')
+    def rollout(
+            self,
+            policy: policy.BasePolicy,
+            controller: controller.BaseController,
+            max_step: float = 100,
+            restart: bool = True):
+
         assert self.race is not None, "You need to start the case before the rollout"
 
         if restart:
             self.race.restart()
+            self.race.step(pystk.Action())
 
-        next_action = pystk.Action()
-        result = []
+        result = list()
+
+        state = pystk.WorldState()
+        state.update()
+
+        s = np.uint8(self.race.render_data[0].image)
+
         for it in range(max_step):
-            self.race.step(next_action)
+            ty, tx = policy(self.map.draw_track(state.karts[0])['track'])
+            world_target = self.map.to_world(tx, ty)
+
+            action = controller(state.karts[0], world_target)
+            self.race.step(action)
 
             state = pystk.WorldState()
             state.update()
 
-            drawn_map = self.map.draw_track(state.karts[0])
-            ty, tx = p(drawn_map['track'])
-            world_target = self.map.to_world(tx, ty)
-            next_action = c(state.karts[0], world_target)
+            sp = np.uint8(self.race.render_data[0].image)
 
-            # Handle the return data
-            t, i, m, s, a = None, None, None, None, None
-            if 'track' in return_data and it == 0:
-                t = self.track
-            if 'action' in return_data:
-                a = next_action
-            if 'image' in return_data:
-                i = 1*np.asarray(self.race.render_data[0].image)
-            if 'map' in return_data:
-                m = drawn_map['track']
-            if 'state' in return_data:
-                s = state
+            result.append(
+                    Data(
+                        s, action_to_numpy(action), sp,
+                        np.float32([1]), np.array([False])))
 
-            result.append(Data(action=a, image=i, map=m, state=s, track=t))
+            s = sp
+
         return result
 
     def __del__(self):
-        if self.race is not None:
-            self.race.stop()
-            del self.race
+        self.stop()
 
         pystk.clean()
 
@@ -157,26 +163,9 @@ class RayRollout(Rollout):
 
 
 if __name__ == "__main__":
-    ray.init(logging_level=40)  # logging.ERROR
-
-    rollouts = [RayRollout.remote() for _ in range(8)]
-    # rollout.start()
-    for rollout in rollouts:
-        ray.get(rollout.start.remote())
-
-    tick = time.time()
-
-    ros = [rollout.rollout.remote(policy.RewardPolicy(Reward()), controller.TuxController(), return_data={'image', 'map', 'state', 'track'}, max_step=100) for rollout in rollouts]
-
-    ros = [ray.get(ro) for ro in ros]
-
-    clock = time.time() - tick
-
-    print(clock)
-    print(sum(map(len, ros)) / clock)
-
-    for j in range(len(ros)):
-
-        viz = TrackViz(ros[j][0].track)
-        for a, i, m, s, t in ros[j]:
-            viz.plot(s.karts[0], i)
+    rollout = Rollout()
+    rollout.start()
+    rollout.rollout(
+            policy.RewardPolicy(Reward()),
+            controller.TuxController(),
+            max_step=1000)

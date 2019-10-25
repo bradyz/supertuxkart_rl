@@ -1,5 +1,7 @@
 from typing import Dict
 
+import numpy as np
+
 
 class BasePolicy:
     def __call__(self, m: Dict):
@@ -11,6 +13,6 @@ class RewardPolicy(BasePolicy):
         self.reward_fun = reward_fun
 
     def __call__(self, m: Dict):
-        import numpy as np
         r = self.reward_fun(m)
+
         return np.unravel_index(np.argmax(r), r.shape)

@@ -127,10 +127,23 @@ class Rollout(object):
         state.update()
 
         s = np.uint8(self.race.render_data[0].image)
+        prev_ty, prev_tx = None, None
+
+        r_list = list()
 
         for it in range(max_step):
+            print(r_list[-1:])
+            # import pdb; pdb.set_trace()
+
             ty, tx = policy(self.map.draw_track(state.karts[0])['track'])
             world_target = self.map.to_world(tx, ty)
+
+            if prev_ty is None:
+                prev_ty = ty
+                prev_tx = tx
+
+            r = (prev_ty - ty) ** 2 + (prev_tx - tx) ** 2
+            r_list.append(r)
 
             action = controller(state.karts[0], world_target)
             self.race.step(action)
@@ -143,9 +156,22 @@ class Rollout(object):
             result.append(
                     Data(
                         s.copy(), action_to_numpy(action), sp.copy(),
-                        np.float32([1]), np.array([False])))
+                        np.float32([r]), np.array([False])))
 
             s = sp
+            prev_tx = tx
+            prev_ty = ty
+
+        G_list = list()
+        G = 0
+        gamma = 0.0
+
+        for r in r_list[::-1]:
+            G = r + gamma * G
+            G_list.insert(0, G)
+
+        for i, data in enumerate(result):
+            result[i] = Data(data.s, data.a, G_list[i], data.sp, data.done)
 
         return result
 
@@ -163,7 +189,12 @@ class RayRollout(Rollout):
 if __name__ == "__main__":
     rollout = Rollout()
     rollout.start()
-    rollout.rollout(
+
+    episode = rollout.rollout(
             policy.RewardPolicy(Reward()),
             controller.TuxController(),
             max_step=1000)
+
+    # for s, a, g, sp, done in episode:
+        # print(g)
+

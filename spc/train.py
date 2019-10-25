@@ -2,43 +2,51 @@ import argparse
 import time
 
 import numpy as np
-import torch
 import tqdm
 import ray
 import wandb
+import torch
+import torch.nn.functional as F
 
 from .rollout import RayRollout, Reward
 from .replay_buffer import ReplayBuffer
 from . import controller, policy
 
 
-N_WORKERS = 4
+N_WORKERS = 1
 
 
 class RaySampler(object):
     def __init__(self):
         self.rollouts = [RayRollout.remote() for _ in range(N_WORKERS)]
 
-    def get_samples(self, agent, max_step=2000):
-        tick = time.time()
-
+    def get_samples(self, agent, samples=2000, max_step=500):
         [ray.get(rollout.start.remote()) for rollout in self.rollouts]
 
+        tick = time.time()
+
         ros = list()
+        total = 0
 
-        for rollout in self.rollouts:
-            ros.append(rollout.rollout.remote(
-                    agent, controller.TuxController(),
-                    max_step=max_step, restart=True))
+        while total < samples:
+            batch_ros = list()
 
-        ros = [ray.get(ro) for ro in ros]
+            for rollout in self.rollouts:
+                batch_ros.append(rollout.rollout.remote(
+                        agent, controller.TuxController(),
+                        max_step=max_step, restart=True))
 
-        [ray.get(rollout.stop.remote()) for rollout in self.rollouts]
+            batch_ros = [ray.get(ro) for ro in batch_ros]
+
+            ros.extend(batch_ros)
+            total += sum(map(len, batch_ros))
 
         clock = time.time() - tick
 
         print('FPS: %.2f' % (sum(map(len, ros)) / clock))
         print('AFPS: %.2f' % (np.mean(list(map(len, ros))) / clock))
+
+        [ray.get(rollout.stop.remote()) for rollout in self.rollouts]
 
         wandb.log({
             'fps': (sum(map(len, ros)) / clock),
@@ -73,6 +81,34 @@ def log_video(rollouts):
         step=wandb.run.summary['step'])
 
 
+class DeepPolicy(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        self.conv1 = torch.nn.Conv2d(3, 32, kernel_size=8, stride=4)
+        self.conv2 = torch.nn.Conv2d(32, 64, 4, 2)
+        self.conv3 = torch.nn.Conv2d(64, 64, 3, 1)
+
+        self.fc4 = torch.nn.Linear(6 * 6 * 64, 512)
+        self.fc5 = torch.nn.Linear(512, 64)
+
+    def forward(self, x):
+        x = F.relu(self.conv1(x))
+        x = F.relu(self.conv2(x))
+        x = F.relu(self.conv3(x))
+        x = F.relu(self.fc4(x.view(x.size(0), -1)))
+        return self.fc5(x)
+
+
+def train(net, replay):
+    s, a, sp, r, done = replay[[1, 0]]
+
+    s = torch.FloatTensor(s.transpose(0, 3, 1, 2))
+    s = s.to(config['device'])
+
+    a_hat = net(s)
+
+
 def main(config):
     wandb.init(project='rl', config=config)
     wandb.run.summary['step'] = 0
@@ -80,7 +116,10 @@ def main(config):
     replay = ReplayBuffer()
     agent = policy.RewardPolicy(Reward())
 
-    for epoch in tqdm.tqdm(range(config['max_epoch']+1), desc='epoch', position=0):
+    net = DeepPolicy()
+    net.to(config['device'])
+
+    for epoch in tqdm.tqdm(range(config['max_epoch']+1), desc='epoch'):
         wandb.run.summary['epoch'] = epoch
         wandb.run.summary['step'] += 1
 
@@ -92,12 +131,12 @@ def main(config):
 
         log_video(rollouts[:4])
 
-    s, a, sp, r, done = replay[[1, 0]]
+        train(net, replay)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--max_epoch', type=int, default=50)
+    parser.add_argument('--max_epoch', type=int, default=1)
     parser.add_argument('--batch_size', type=int, default=128)
 
     # Optimizer args.

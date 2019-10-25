@@ -34,8 +34,6 @@ class ReplayBuffer(object):
         self.buffers = dict()
         self.max_size = max_size
 
-        self.len = 0
-
     def add(self, data):
         for key in data._fields:
             val = getattr(data, key)
@@ -44,8 +42,6 @@ class ReplayBuffer(object):
                 self.buffers[key] = Buffer(val, self.max_size)
 
             self.buffers[key].add(val)
-
-        self.len += 1
 
     def __getitem__(self, idx):
         result = list()
@@ -56,4 +52,11 @@ class ReplayBuffer(object):
         return result
 
     def __len__(self):
-        return min(self.max_size, self.len)
+        lens = list()
+
+        for _, val in self.buffers.items():
+            lens.append(len(val))
+
+        assert min(lens) == max(lens)
+
+        return lens[0]

@@ -1,6 +1,4 @@
-import time
-
-from typing import Dict, Set
+from typing import Dict
 
 import pystk
 import ray
@@ -8,7 +6,7 @@ import numpy as np
 
 from . import controller, policy
 from .track_map import Map
-from .replay_buffer import ReplayBuffer, Data
+from .replay_buffer import Data
 
 
 class Reward:
@@ -144,7 +142,7 @@ class Rollout(object):
 
             result.append(
                     Data(
-                        s, action_to_numpy(action), sp,
+                        s.copy(), action_to_numpy(action), sp.copy(),
                         np.float32([1]), np.array([False])))
 
             s = sp

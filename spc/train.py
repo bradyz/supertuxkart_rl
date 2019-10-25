@@ -81,27 +81,8 @@ def log_video(rollouts):
         step=wandb.run.summary['step'])
 
 
-class DeepPolicy(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-
-        self.conv1 = torch.nn.Conv2d(3, 32, kernel_size=8, stride=4)
-        self.conv2 = torch.nn.Conv2d(32, 64, 4, 2)
-        self.conv3 = torch.nn.Conv2d(64, 64, 3, 1)
-
-        self.fc4 = torch.nn.Linear(6 * 6 * 64, 512)
-        self.fc5 = torch.nn.Linear(512, 64)
-
-    def forward(self, x):
-        x = F.relu(self.conv1(x))
-        x = F.relu(self.conv2(x))
-        x = F.relu(self.conv3(x))
-        x = F.relu(self.fc4(x.view(x.size(0), -1)))
-        return self.fc5(x)
-
-
 def train(net, replay):
-    s, a, sp, r, done = replay[[1, 0]]
+    s, a, sp, g, done = replay[[1, 0]]
 
     s = torch.FloatTensor(s.transpose(0, 3, 1, 2))
     s = s.to(config['device'])
@@ -114,16 +95,14 @@ def main(config):
     wandb.run.summary['step'] = 0
 
     replay = ReplayBuffer()
-    agent = policy.RewardPolicy(Reward())
-
-    net = DeepPolicy()
+    net = policy.DeepNet()
     net.to(config['device'])
 
     for epoch in tqdm.tqdm(range(config['max_epoch']+1), desc='epoch'):
         wandb.run.summary['epoch'] = epoch
         wandb.run.summary['step'] += 1
 
-        rollouts = RaySampler().get_samples(agent)
+        rollouts = RaySampler().get_samples(policy.DeepPolicy(net))
 
         for rollout in rollouts:
             for data in rollout:

@@ -63,6 +63,20 @@ class TrackViz:
         self.plot(kart_info, image)
 
 
+class HumanPolicy(BasePolicy):
+    def __call__(self, s):
+        import cv2
+
+        cv2.imshow('s', cv2.cvtColor(s, cv2.COLOR_BGR2RGB))
+        key = cv2.waitKey(10)
+
+        action = pystk.Action()
+        action.steer = int(key == 97) * -1.0 + int(key == 100) * 1.0
+        action.acceleration = 0.1
+
+        return s
+
+
 class Rollout(object):
     def __init__(self, config: pystk.GraphicsConfig = None):
         if config is None:
@@ -82,8 +96,8 @@ class Rollout(object):
             config = pystk.RaceConfig()
             config.players[0].controller = pystk.PlayerConfig.Controller.PLAYER_CONTROL
             config.track = np.random.choice(["lighthouse", "zengarden"])
-            # config.track = "zengarden"
-            config.step_size = 0.1
+            config.track = "zengarden"
+            config.step_size = 0.05
 
         self.stop()
 
@@ -132,20 +146,21 @@ class Rollout(object):
         r_list = list()
 
         for it in range(max_step):
-            print(r_list[-1:])
-            # import pdb; pdb.set_trace()
-
+            # Autopilot.
             ty, tx = policy(self.map.draw_track(state.karts[0])['track'])
-            world_target = self.map.to_world(tx, ty)
+            # world_target = self.map.to_world(tx, ty)
+            # action = controller(state.karts[0], world_target)
 
             if prev_ty is None:
                 prev_ty = ty
                 prev_tx = tx
 
-            r = (prev_ty - ty) ** 2 + (prev_tx - tx) ** 2
-            r_list.append(r)
+            action = policy(s)
 
-            action = controller(state.karts[0], world_target)
+            # HACK: fix...
+            r = (prev_ty - ty) ** 2 + (prev_tx - tx) ** 2
+            r_list.append(r if r <= 1 else 0)
+
             self.race.step(action)
 
             state = pystk.WorldState()
@@ -164,7 +179,7 @@ class Rollout(object):
 
         G_list = list()
         G = 0
-        gamma = 0.0
+        gamma = 0.9
 
         for r in r_list[::-1]:
             G = r + gamma * G
@@ -193,8 +208,7 @@ if __name__ == "__main__":
     episode = rollout.rollout(
             policy.RewardPolicy(Reward()),
             controller.TuxController(),
-            max_step=1000)
+            max_step=100)
 
-    # for s, a, g, sp, done in episode:
-        # print(g)
-
+    for s, a, g, sp, done in episode:
+        print(g)

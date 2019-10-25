@@ -2,6 +2,8 @@ from typing import Dict
 
 import numpy as np
 import torch
+import torch.nn.functional as F
+import pystk
 
 
 class BasePolicy:
@@ -27,8 +29,8 @@ class DeepNet(torch.nn.Module):
         self.conv2 = torch.nn.Conv2d(32, 64, 4, 2)
         self.conv3 = torch.nn.Conv2d(64, 64, 3, 1)
 
-        self.fc4 = torch.nn.Linear(6 * 6 * 64, 512)
-        self.fc5 = torch.nn.Linear(512, 64)
+        self.fc4 = torch.nn.Linear(4 * 4 * 64, 512)
+        self.fc5 = torch.nn.Linear(512, int(2 ** 3))
 
     def forward(self, x):
         x = F.relu(self.conv1(x))
@@ -43,10 +45,34 @@ class DeepNet(torch.nn.Module):
 class DeepPolicy(BasePolicy):
     def __init__(self, net):
         self.net = net
+        self.net.cpu()
 
     def __call__(self, s):
-        s = torch.FloatTensor(s.transpose(0, 3, 1, 2))
-        s = s.to(self.net.device)
+        # HACK: deterministic
+        s = s.transpose(2, 0, 1)
+        s = torch.FloatTensor(s).unsqueeze(0)
 
-        prob = net(s)
-        import pdb; pdb.set_trace()
+        prob = F.softmax(self.net(s).squeeze()).detach().cpu().numpy()
+        action_index = np.random.choice(list(range(8)), p=prob)
+
+        binary = bin(action_index).lstrip('0b').rjust(3, '0')
+
+        action = pystk.Action()
+        action.steer = int(binary[0] == '0') * -0.25 + int(binary[1] == '1') * 0.25
+        action.acceleration = int(binary[2] == '1') * 0.25
+
+        return action, action_index
+
+
+class HumanPolicy(BasePolicy):
+    def __call__(self, s):
+        import cv2
+
+        cv2.imshow('s', cv2.cvtColor(s, cv2.COLOR_BGR2RGB))
+        key = cv2.waitKey(10)
+
+        action = pystk.Action()
+        action.steer = int(key == 97) * -1.0 + int(key == 100) * 1.0
+        action.acceleration = 0.1
+
+        return s

@@ -63,20 +63,6 @@ class TrackViz:
         self.plot(kart_info, image)
 
 
-class HumanPolicy(BasePolicy):
-    def __call__(self, s):
-        import cv2
-
-        cv2.imshow('s', cv2.cvtColor(s, cv2.COLOR_BGR2RGB))
-        key = cv2.waitKey(10)
-
-        action = pystk.Action()
-        action.steer = int(key == 97) * -1.0 + int(key == 100) * 1.0
-        action.acceleration = 0.1
-
-        return s
-
-
 class Rollout(object):
     def __init__(self, config: pystk.GraphicsConfig = None):
         if config is None:
@@ -141,24 +127,20 @@ class Rollout(object):
         state.update()
 
         s = np.uint8(self.race.render_data[0].image)
-        prev_ty, prev_tx = None, None
 
         r_list = list()
 
         for it in range(max_step):
             # Autopilot.
-            ty, tx = policy(self.map.draw_track(state.karts[0])['track'])
+            # ty, tx = policy(self.map.draw_track(state.karts[0])['track'])
             # world_target = self.map.to_world(tx, ty)
             # action = controller(state.karts[0], world_target)
 
-            if prev_ty is None:
-                prev_ty = ty
-                prev_tx = tx
-
-            action = policy(s)
+            # Network.
+            action, action_i = policy(s)
 
             # HACK: fix...
-            r = (prev_ty - ty) ** 2 + (prev_tx - tx) ** 2
+            r = np.linalg.norm(state.karts[0].velocity)
             r_list.append(r if r <= 1 else 0)
 
             self.race.step(action)
@@ -170,12 +152,10 @@ class Rollout(object):
 
             result.append(
                     Data(
-                        s.copy(), action_to_numpy(action), sp.copy(),
-                        np.float32([r]), np.array([False])))
+                        s.copy(), np.uint8([action_i]), sp.copy(),
+                        np.array([r]), np.array([False])))
 
             s = sp
-            prev_tx = tx
-            prev_ty = ty
 
         G_list = list()
         G = 0
@@ -186,7 +166,9 @@ class Rollout(object):
             G_list.insert(0, G)
 
         for i, data in enumerate(result):
-            result[i] = Data(data.s, data.a, G_list[i], data.sp, data.done)
+            result[i] = Data(
+                    data.s, data.a,
+                    np.float32([G_list[i]]), data.sp, data.done)
 
         return result
 
@@ -196,6 +178,7 @@ class Rollout(object):
         pystk.clean()
 
 
+# @ray.remote(num_gpus=0.15)
 @ray.remote
 class RayRollout(Rollout):
     pass

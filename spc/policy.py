@@ -45,20 +45,24 @@ class DeepNet(torch.nn.Module):
 class DeepPolicy(BasePolicy):
     def __init__(self, net):
         self.net = net
-        self.net.cpu()
+        self.net.eval()
 
     def __call__(self, s):
-        # HACK: deterministic
-        s = s.transpose(2, 0, 1)
-        s = torch.FloatTensor(s).unsqueeze(0)
+        if np.random.rand() < 0.05:
+            action_index = np.random.choice(list(range(8)))
+        else:
+            # HACK: deterministic
+            with torch.no_grad():
+                s = s.transpose(2, 0, 1)
+                s = torch.FloatTensor(s).unsqueeze(0).cuda()
 
-        prob = F.softmax(self.net(s).squeeze()).detach().cpu().numpy()
-        action_index = np.random.choice(list(range(8)), p=prob)
+                prob = F.softmax(self.net(s).squeeze()).detach().cpu().numpy()
+                action_index = np.random.choice(list(range(8)), p=prob)
 
         binary = bin(action_index).lstrip('0b').rjust(3, '0')
 
         action = pystk.Action()
-        action.steer = int(binary[0] == '0') * -0.25 + int(binary[1] == '1') * 0.25
+        action.steer = int(binary[0] == '0') * -1.0 + int(binary[1] == '1') * 1.0
         action.acceleration = int(binary[2] == '1') * 0.25
 
         return action, action_index

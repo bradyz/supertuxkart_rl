@@ -19,7 +19,7 @@ class RaySampler(object):
     def __init__(self):
         self.rollouts = [RayRollout.remote() for _ in range(N_WORKERS)]
 
-    def get_samples(self, agent, samples=20000, max_step=2000):
+    def get_samples(self, agent, samples=10000, max_step=2000):
         [ray.get(rollout.start.remote()) for rollout in self.rollouts]
 
         tick = time.time()
@@ -44,6 +44,8 @@ class RaySampler(object):
 
         print('FPS: %.2f' % (sum(map(len, ros)) / clock))
         print('AFPS: %.2f' % (np.mean(list(map(len, ros))) / clock))
+        print('Count: %d' % (sum(map(len, ros))))
+        print('Time: %.2f' % clock)
 
         [ray.get(rollout.stop.remote()) for rollout in self.rollouts]
 
@@ -82,6 +84,7 @@ def log_video(rollouts):
 
 def train(net, optim, replay, config):
     net.to(config['device'])
+    net.train()
 
     losses = list()
 
@@ -110,6 +113,8 @@ def train(net, optim, replay, config):
         wandb.run.summary['step'] += 1
 
         losses.append(loss_mean.item())
+
+        wandb.log({'loss_batch': loss_mean.item()}, step=wandb.run.summary['step'])
 
     return np.mean(losses)
 

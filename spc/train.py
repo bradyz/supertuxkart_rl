@@ -19,7 +19,7 @@ class RaySampler(object):
     def __init__(self):
         self.rollouts = [RayRollout.remote() for _ in range(N_WORKERS)]
 
-    def get_samples(self, agent, samples=10000, max_step=2000):
+    def get_samples(self, agent, samples=80000, max_step=2000):
         [ray.get(rollout.start.remote()) for rollout in self.rollouts]
 
         tick = time.time()
@@ -43,17 +43,12 @@ class RaySampler(object):
         clock = time.time() - tick
 
         print('FPS: %.2f' % (sum(map(len, ros)) / clock))
-        print('AFPS: %.2f' % (np.mean(list(map(len, ros))) / clock))
         print('Count: %d' % (sum(map(len, ros))))
         print('Time: %.2f' % clock)
 
         [ray.get(rollout.stop.remote()) for rollout in self.rollouts]
 
-        wandb.log({
-            'fps': (sum(map(len, ros)) / clock),
-            'afps': (np.mean(list(map(len, ros))) / clock),
-            },
-            step=wandb.run.summary['step'])
+        wandb.log({'fps': (sum(map(len, ros)) / clock)}, step=wandb.run.summary['step'])
 
         return ros
 
@@ -95,15 +90,19 @@ def train(net, optim, replay, config):
         s = torch.FloatTensor(s.transpose(0, 3, 1, 2))
         s = s.to(config['device'])
 
-        mask = torch.FloatTensor(np.eye(8)[a.squeeze()])
-        mask = mask.to(config['device'])
+        a = torch.FloatTensor(a).squeeze()
+        a = a.to(config['device'])
+
+        # mask = torch.FloatTensor(np.eye(8)[a.squeeze()])
+        # mask = mask.to(config['device'])
 
         g = torch.FloatTensor(g)
         g = g.to(config['device'])
         g = (g - g.mean()) / (g.std() + 1e-7)
 
-        a_hat = net(s)
-        loss = -(g * mask * a_hat).sum(1)
+        m = torch.distributions.Categorical(logits=net(s))
+
+        loss = -(g * m.log_prob(a)).sum(1)
         loss_mean = loss.mean()
 
         loss_mean.backward()
@@ -125,7 +124,7 @@ def main(config):
 
     net = policy.DeepNet()
     net.to(config['device'])
-    optim = torch.optim.Adam(net.parameters(), **config['optimizer_args'])
+    optim = torch.optim.Adam(net.parameters(), lr=config['lr'])
 
     replay = ReplayBuffer()
 
@@ -140,7 +139,7 @@ def main(config):
     for epoch in tqdm.tqdm(range(config['max_epoch']+1), desc='epoch'):
         wandb.run.summary['epoch'] = epoch
 
-        rollouts = RaySampler().get_samples(policy.DeepPolicy(net))
+        rollouts = RaySampler().get_samples(policy.DeepPolicy(net), 80000)
         returns = list()
 
         for rollout in rollouts:
@@ -160,11 +159,10 @@ def main(config):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--max_epoch', type=int, default=1000)
-    parser.add_argument('--batch_size', type=int, default=128)
+    parser.add_argument('--batch_size', type=int, default=256)
 
     # Optimizer args.
-    parser.add_argument('--lr', type=float, default=1e-5)
-    parser.add_argument('--weight_decay', type=float, default=5e-4)
+    parser.add_argument('--lr', type=float, default=1e-3)
 
     parsed = parser.parse_args()
 
@@ -172,10 +170,7 @@ if __name__ == '__main__':
             'max_epoch': parsed.max_epoch,
             'device': torch.device('cuda' if torch.cuda.is_available() else 'cpu'),
             'batch_size': parsed.batch_size,
-            'optimizer_args': {
-                'lr': parsed.lr,
-                'weight_decay': parsed.weight_decay,
-                }
+            'lr': parsed.lr,
             }
 
     ray.init(logging_level=40, num_cpus=N_WORKERS, num_gpus=1)

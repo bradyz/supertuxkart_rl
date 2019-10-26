@@ -159,7 +159,7 @@ class Rollout(object):
 
         G_list = list()
         G = 0
-        gamma = 0.9
+        gamma = 0.99
 
         for r in r_list[::-1]:
             G = r + gamma * G

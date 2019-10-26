@@ -48,7 +48,7 @@ class DeepPolicy(BasePolicy):
         self.net.eval()
 
     def __call__(self, s):
-        if np.random.rand() < 0.05:
+        if np.random.rand() < 0.25:
             action_index = np.random.choice(list(range(8)))
         else:
             # HACK: deterministic
@@ -56,8 +56,8 @@ class DeepPolicy(BasePolicy):
                 s = s.transpose(2, 0, 1)
                 s = torch.FloatTensor(s).unsqueeze(0).cuda()
 
-                prob = F.softmax(self.net(s).squeeze()).detach().cpu().numpy()
-                action_index = np.random.choice(list(range(8)), p=prob)
+                m = torch.distributions.Categorical(logits=self.net(s))
+                action_index = m.sample().item()
 
         binary = bin(action_index).lstrip('0b').rjust(3, '0')
 

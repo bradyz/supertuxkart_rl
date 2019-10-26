@@ -82,7 +82,7 @@ class Rollout(object):
             config = pystk.RaceConfig()
             config.players[0].controller = pystk.PlayerConfig.Controller.PLAYER_CONTROL
             config.track = np.random.choice(["lighthouse", "zengarden"])
-            config.track = "zengarden"
+            # config.track = "zengarden"
             config.step_size = 0.05
 
         self.stop()

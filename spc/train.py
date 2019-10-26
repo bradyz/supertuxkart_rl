@@ -102,7 +102,7 @@ def train(net, optim, replay, config):
         g = g.to(config['device'])
         g = (g - g.mean()) / (g.std() + 1e-7)
 
-        a_hat = torch.nn.functional.softmax(net(s), dim=1)
+        a_hat = net(s)
         loss = -(g * mask * a_hat).sum(1)
         loss_mean = loss.mean()
 
@@ -125,7 +125,7 @@ def main(config):
 
     net = policy.DeepNet()
     net.to(config['device'])
-    optim = torch.optim.Adam(net.parameters(), lr=2e-4)
+    optim = torch.optim.Adam(net.parameters(), **config['optimizer_args'])
 
     replay = ReplayBuffer()
 
@@ -141,16 +141,20 @@ def main(config):
         wandb.run.summary['epoch'] = epoch
 
         rollouts = RaySampler().get_samples(policy.DeepPolicy(net))
+        returns = list()
 
         for rollout in rollouts:
+            returns.append(rollout[0].r)
+
             for data in rollout:
                 replay.add(data)
 
-        log_video(rollouts[:4])
+        wandb.log({'return': np.mean(returns)}, step=wandb.run.summary['step'])
 
+        log_video(rollouts[:4])
         loss_epoch = train(net, optim, replay, config)
 
-        wandb.log({'loss': loss_epoch}, step=wandb.run.summary['step'])
+        wandb.log({'loss': loss_epoch, 'return': np.mean(returns)}, step=wandb.run.summary['step'])
 
 
 if __name__ == '__main__':
@@ -159,8 +163,8 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', type=int, default=128)
 
     # Optimizer args.
-    parser.add_argument('--lr', type=float, default=1e-4)
-    parser.add_argument('--weight_decay', type=float, default=5e-5)
+    parser.add_argument('--lr', type=float, default=1e-5)
+    parser.add_argument('--weight_decay', type=float, default=5e-4)
 
     parsed = parser.parse_args()
 

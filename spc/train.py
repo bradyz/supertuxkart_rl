@@ -162,7 +162,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', type=int, default=256)
 
     # Optimizer args.
-    parser.add_argument('--lr', type=float, default=1e-3)
+    parser.add_argument('--lr', type=float, default=1e-2)
 
     parsed = parser.parse_args()
 

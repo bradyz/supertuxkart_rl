@@ -63,7 +63,7 @@ class DeepPolicy(BasePolicy):
 
         action = pystk.Action()
         action.steer = int(binary[0] == '1') * -1.0 + int(binary[1] == '1') * 1.0
-        action.acceleration = int(binary[2] == '1') * 0.1
+        action.acceleration = int(binary[2] == '1') * 0.25
 
         return action, action_index
 

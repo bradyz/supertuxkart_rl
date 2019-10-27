@@ -4,6 +4,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import pystk
+import cv2
 
 
 class BasePolicy:
@@ -25,6 +26,7 @@ class DeepNet(torch.nn.Module):
     def __init__(self):
         super().__init__()
 
+        self.norm = torch.nn.BatchNorm2d(3)
         self.conv1 = torch.nn.Conv2d(3, 32, kernel_size=8, stride=4)
         self.conv2 = torch.nn.Conv2d(32, 64, 4, 2)
         self.conv3 = torch.nn.Conv2d(64, 64, 3, 1)
@@ -33,6 +35,7 @@ class DeepNet(torch.nn.Module):
         self.fc5 = torch.nn.Linear(512, int(2 ** 3))
 
     def forward(self, x):
+        x = self.norm(x)
         x = F.relu(self.conv1(x))
         x = F.relu(self.conv2(x))
         x = F.relu(self.conv3(x))
@@ -63,16 +66,15 @@ class DeepPolicy(BasePolicy):
 
         action = pystk.Action()
         action.steer = int(binary[0] == '1') * -1.0 + int(binary[1] == '1') * 1.0
-        action.acceleration = int(binary[2] == '1') * 0.25
+        action.acceleration = int(binary[2] == '1') * 1.0
 
         return action, action_index
 
 
 class HumanPolicy(BasePolicy):
     def __call__(self, s):
-        import cv2
-
         cv2.imshow('s', cv2.cvtColor(s, cv2.COLOR_BGR2RGB))
+
         key = cv2.waitKey(10)
 
         action = pystk.Action()

@@ -2,7 +2,6 @@ import argparse
 import time
 
 import numpy as np
-import tqdm
 import ray
 import wandb
 import torch
@@ -25,7 +24,6 @@ class RaySampler(object):
         [ray.get(rollout.start.remote(track=random_track())) for rollout in self.rollouts]
 
         tick = time.time()
-
         total = 0
 
         for _ in range(iterations):
@@ -37,7 +35,6 @@ class RaySampler(object):
                         max_step=max_step, restart=True, gamma=gamma))
 
             batch_ros = [ray.get(ro) for ro in batch_ros]
-
             total += sum(len(x[0]) for x in batch_ros)
 
             yield batch_ros
@@ -92,7 +89,7 @@ def train(net, optim, replay, config):
 
 
 def main(config):
-    wandb.init(project='rl', config=config)
+    wandb.init(project='rl', dir=config['dir'], config=config)
     wandb.run.summary['step'] = 0
 
     net = policy.DeepNet()
@@ -109,7 +106,7 @@ def main(config):
             # controller.TuxController(),
             # max_step=10000)
 
-    for epoch in tqdm.tqdm(range(config['max_epoch']+1), desc='epoch'):
+    for epoch in range(config['max_epoch']+1):
         wandb.run.summary['epoch'] = epoch
 
         returns = list()
@@ -125,15 +122,14 @@ def main(config):
                 for data in rollout:
                     replay.add(data)
 
-        wandb.log({'return': np.mean(returns)}, step=wandb.run.summary['step'])
-
         wandb.log({
+            'return': np.mean(returns),
             'video': [wandb.Video(utils.make_video(rollouts), format='mp4', fps=20)]},
             step=wandb.run.summary['step'])
 
         loss_epoch = train(net, optim, replay, config)
 
-        wandb.log({'loss': loss_epoch, 'return': np.mean(returns)}, step=wandb.run.summary['step'])
+        wandb.log({'loss': loss_epoch}, step=wandb.run.summary['step'])
 
 
 if __name__ == '__main__':
@@ -144,11 +140,13 @@ if __name__ == '__main__':
     # Optimizer args.
     parser.add_argument('--lr', type=float, default=1e-2)
     parser.add_argument('--gamma', type=float, default=0.5)
+    parser.add_argument('--dir', type=str, default='./wandb')
 
     parsed = parser.parse_args()
 
     config = {
             'max_epoch': parsed.max_epoch,
+            'dir': parsed.dir,
             'device': torch.device('cuda' if torch.cuda.is_available() else 'cpu'),
             'batch_size': parsed.batch_size,
             'lr': parsed.lr,

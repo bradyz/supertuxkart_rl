@@ -79,13 +79,14 @@ class Rollout(object):
 
     def start(
             self,
-            config: pystk.RaceConfig = None, map_config: Dict = dict(world_size=(50, 50), max_offset=50),
+            config: pystk.RaceConfig = None,
+            map_config: Dict = dict(world_size=(50, 50), max_offset=50),
             track: str = 'lighthouse'):
         if config is None:
             config = pystk.RaceConfig()
             config.players[0].controller = pystk.PlayerConfig.Controller.PLAYER_CONTROL
             config.track = track
-            config.step_size = 0.05
+            config.step_size = 0.1
 
         self.stop()
 
@@ -94,10 +95,10 @@ class Rollout(object):
         self.race = pystk.Race(config)
         self.race.start()
 
-        # self.track = pystk.Track()
-        # self.track.update()
+        self.track = pystk.Track()
+        self.track.update()
 
-        # self.map = Map(self.track, **map_config)
+        self.map = Map(self.track, **map_config)
 
     def stop(self):
         if self.race is not None:
@@ -137,6 +138,7 @@ class Rollout(object):
             # ty, tx = policy(self.map.draw_track(state.karts[0])['track'])
             # world_target = self.map.to_world(tx, ty)
             # action = controller(state.karts[0], world_target)
+
             s = np.uint8(self.race.render_data[0].image)
 
             # Network.

@@ -77,12 +77,14 @@ class Rollout(object):
         self.track = None
         self.map = None
 
-    def start(self, config: pystk.RaceConfig = None, map_config: Dict = dict(world_size=(50, 50), max_offset=50)):
+    def start(
+            self,
+            config: pystk.RaceConfig = None, map_config: Dict = dict(world_size=(50, 50), max_offset=50),
+            track: str = 'lighthouse'):
         if config is None:
             config = pystk.RaceConfig()
             config.players[0].controller = pystk.PlayerConfig.Controller.PLAYER_CONTROL
-            config.track = np.random.choice(["lighthouse", "zengarden"])
-            # config.track = "zengarden"
+            config.track = track
             config.step_size = 0.05
 
         self.stop()
@@ -92,10 +94,10 @@ class Rollout(object):
         self.race = pystk.Race(config)
         self.race.start()
 
-        self.track = pystk.Track()
-        self.track.update()
+        # self.track = pystk.Track()
+        # self.track.update()
 
-        self.map = Map(self.track, **map_config)
+        # self.map = Map(self.track, **map_config)
 
     def stop(self):
         if self.race is not None:
@@ -113,7 +115,8 @@ class Rollout(object):
             policy: policy.BasePolicy,
             controller: controller.BaseController,
             max_step: float = 100,
-            restart: bool = True):
+            restart: bool = True,
+            gamma: float = 1.0):
 
         assert self.race is not None, "You need to start the case before the rollout"
 
@@ -126,15 +129,15 @@ class Rollout(object):
         state = pystk.WorldState()
         state.update()
 
-        s = np.uint8(self.race.render_data[0].image)
-
         r_list = list()
+        r_total = 0
 
         for it in range(max_step):
             # Autopilot.
             # ty, tx = policy(self.map.draw_track(state.karts[0])['track'])
             # world_target = self.map.to_world(tx, ty)
             # action = controller(state.karts[0], world_target)
+            s = np.uint8(self.race.render_data[0].image)
 
             # Network.
             action, action_i = policy(s)
@@ -142,24 +145,20 @@ class Rollout(object):
             # HACK: fix...
             r = np.linalg.norm(state.karts[0].velocity)
             r_list.append(r)
+            r_total += r
 
             self.race.step(action)
 
             state = pystk.WorldState()
             state.update()
 
-            sp = np.uint8(self.race.render_data[0].image)
-
             result.append(
                     Data(
-                        s.copy(), np.uint8([action_i]), sp.copy(),
+                        s.copy(), np.uint8([action_i]),
                         np.array([r]), np.array([False])))
-
-            s = sp
 
         G_list = list()
         G = 0
-        gamma = 0.99
 
         for r in r_list[::-1]:
             G = r + gamma * G
@@ -168,9 +167,9 @@ class Rollout(object):
         for i, data in enumerate(result):
             result[i] = Data(
                     data.s, data.a,
-                    np.float32([G_list[i]]), data.sp, data.done)
+                    np.float32([G_list[i]]), data.done)
 
-        return result
+        return result, r_total
 
     def __del__(self):
         self.stop()
@@ -178,7 +177,7 @@ class Rollout(object):
         pystk.clean()
 
 
-@ray.remote(num_gpus=0.25)
+@ray.remote(num_cpus=1, num_gpus=1.0 / 8.0)
 class RayRollout(Rollout):
     pass
 
@@ -192,5 +191,5 @@ if __name__ == "__main__":
             controller.TuxController(),
             max_step=1000)
 
-    for s, a, g, sp, done in episode:
+    for s, a, g, done in episode:
         print(g)

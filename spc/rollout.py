@@ -141,7 +141,7 @@ class Rollout(object):
 
             # HACK: fix...
             r = np.linalg.norm(state.karts[0].velocity)
-            r_list.append(r if r <= 1 else 0)
+            r_list.append(r)
 
             self.race.step(action)
 
@@ -188,9 +188,9 @@ if __name__ == "__main__":
     rollout.start()
 
     episode = rollout.rollout(
-            policy.RewardPolicy(Reward()),
+            policy.HumanPolicy(),
             controller.TuxController(),
-            max_step=100)
+            max_step=1000)
 
     for s, a, g, sp, done in episode:
         print(g)

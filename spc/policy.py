@@ -79,4 +79,4 @@ class HumanPolicy(BasePolicy):
         action.steer = int(key == 97) * -1.0 + int(key == 100) * 1.0
         action.acceleration = 0.1
 
-        return s
+        return action, 0

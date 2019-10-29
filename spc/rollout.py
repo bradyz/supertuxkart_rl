@@ -11,6 +11,8 @@ from .replay_buffer import Data
 
 class Reward:
     def __call__(self, track_map):
+        import pdb; pdb.set_trace()
+
         return track_map[:, :, 1] + track_map[:, :, 2] / 50.
 
 
@@ -133,42 +135,53 @@ class Rollout(object):
         r_list = list()
         r_total = 0
 
+        d = state.karts[0].distance_down_track
+
         for it in range(max_step):
             # Autopilot.
-            # ty, tx = policy(self.map.draw_track(state.karts[0])['track'])
+            # birdview = self.map.draw_track(state.karts[0])['track']
+
+            # ty, tx = policy(birdview)
             # world_target = self.map.to_world(tx, ty)
             # action = controller(state.karts[0], world_target)
+
+            # import cv2
+            # image = birdview[:,:,2]/50 + birdview[:,:,1]
+            # cv2.imshow('image', image)
+            # cv2.waitKey(1)
 
             s = np.uint8(self.race.render_data[0].image)
 
             # Network.
-            action, action_i = policy(s)
-
-            # HACK: fix...
-            r = np.linalg.norm(state.karts[0].velocity)
-            r_list.append(r)
-            r_total += r
-
+            action, action_i, p_action = policy(s)
             self.race.step(action)
 
             state = pystk.WorldState()
             state.update()
 
+            # HACK: fix...
+            d_new = state.karts[0].distance_down_track
+            r = d_new - d
+            r_list.append(r)
+            r_total = max(r_total, d)
+            d_new = d
+
             result.append(
                     Data(
-                        s.copy(), np.uint8([action_i]),
+                        s.copy(), np.uint8([action_i]), np.float32([p_action]),
                         np.array([r]), np.array([False])))
 
         G_list = list()
         G = 0
 
+        # Hack.
         for r in r_list[::-1]:
             G = r + gamma * G
             G_list.insert(0, G)
 
         for i, data in enumerate(result):
             result[i] = Data(
-                    data.s, data.a,
+                    data.s, data.a, np.float32([p_action]),
                     np.float32([G_list[i]]), data.done)
 
         return result, r_total
@@ -189,6 +202,7 @@ if __name__ == "__main__":
     rollout.start()
 
     episode = rollout.rollout(
+            # policy.RewardPolicy(Reward),
             policy.HumanPolicy(),
             controller.TuxController(),
             max_step=1000)

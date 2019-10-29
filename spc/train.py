@@ -12,15 +12,17 @@ from . import controller, policy
 from . import utils
 
 
-N_WORKERS = 4
+N_WORKERS = 1
 
 
 class RaySampler(object):
     def __init__(self):
         self.rollouts = [RayRollout.remote() for _ in range(N_WORKERS)]
 
-    def get_samples(self, agent, iterations=20, max_step=1000, gamma=1.0):
+    def get_samples(self, agent, iterations=1, max_step=100, gamma=1.0):
         random_track = lambda: np.random.choice(["lighthouse", "zengarden", "hacienda", "sandtrack", "volcano_island"])
+        random_track = lambda: np.random.choice(["sandtrack"])
+
         [ray.get(rollout.start.remote(track=random_track())) for rollout in self.rollouts]
 
         tick = time.time()
@@ -58,7 +60,7 @@ def train(net, optim, replay, config):
 
     for i in range(1000):
         indices = np.random.choice(len(replay), config['batch_size'])
-        s, a, g, done = replay[indices]
+        s, a, p_old, g, done = replay[indices]
 
         s = torch.FloatTensor(s.transpose(0, 3, 1, 2))
         s = s.to(config['device'])
@@ -70,9 +72,18 @@ def train(net, optim, replay, config):
         g = g.to(config['device'])
         g = (g - g.mean()) / (g.std() + 1e-7)
 
-        m = torch.distributions.Categorical(logits=net(s))
+        p_old = torch.FloatTensor(p_old)
+        p_old = p_old.to(config['device'])
 
-        loss = -(g * m.log_prob(a)).sum(1)
+        m = torch.distributions.Categorical(logits=net(s))
+        log_p = m.log_prob(a)
+
+        if config['importance_sampling']:
+            rho = torch.exp(log_p) / p_old
+        else:
+            rho = 1.0
+
+        loss = -(rho * g * log_p).sum(1)
         loss_mean = loss.mean()
 
         loss_mean.backward()
@@ -96,7 +107,7 @@ def main(config):
     net.to(config['device'])
     optim = torch.optim.Adam(net.parameters(), lr=config['lr'])
 
-    replay = ReplayBuffer()
+    replay = ReplayBuffer(max_size=50000)
 
     # rollout = Rollout()
     # rollout.start()
@@ -124,7 +135,8 @@ def main(config):
 
         wandb.log({
             'return': np.mean(returns),
-            'video': [wandb.Video(utils.make_video(rollouts), format='mp4', fps=20)]},
+            # 'video': [wandb.Video(utils.make_video(rollouts), format='mp4', fps=20)]
+            },
             step=wandb.run.summary['step'])
 
         loss_epoch = train(net, optim, replay, config)
@@ -136,6 +148,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--max_epoch', type=int, default=10000)
     parser.add_argument('--batch_size', type=int, default=256)
+    parser.add_argument('--importance_sampling', action='store_true', default=False)
 
     # Optimizer args.
     parser.add_argument('--lr', type=float, default=1e-2)
@@ -151,6 +164,7 @@ if __name__ == '__main__':
             'batch_size': parsed.batch_size,
             'lr': parsed.lr,
             'gamma': parsed.gamma,
+            'importance_sampling': parsed.importance_sampling,
             }
 
     ray.init(logging_level=40, num_cpus=N_WORKERS, num_gpus=1)

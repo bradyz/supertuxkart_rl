@@ -7,6 +7,9 @@ import pystk
 import cv2
 
 
+N_ACTIONS = 8
+
+
 class BasePolicy:
     def __call__(self, m: Dict):
         raise NotImplementedError("BasePolicy.__call__")
@@ -32,7 +35,7 @@ class DeepNet(torch.nn.Module):
         self.conv3 = torch.nn.Conv2d(64, 64, 3, 1)
 
         self.fc4 = torch.nn.Linear(4 * 4 * 64, 512)
-        self.fc5 = torch.nn.Linear(512, int(2 ** 3))
+        self.fc5 = torch.nn.Linear(512, N_ACTIONS)
 
     def forward(self, x):
         x = self.norm(x)
@@ -50,25 +53,30 @@ class DeepPolicy(BasePolicy):
         self.net = net
         self.net.eval()
 
-    def __call__(self, s):
-        if np.random.rand() < 0.25:
+    def __call__(self, s, eps=0.05):
+        # HACK: deterministic
+        with torch.no_grad():
+            s = s.transpose(2, 0, 1)
+            s = torch.FloatTensor(s).unsqueeze(0)
+
+            m = torch.distributions.Categorical(logits=self.net(s))
+
+        if np.random.rand() < eps:
             action_index = np.random.choice(list(range(8)))
         else:
-            # HACK: deterministic
-            with torch.no_grad():
-                s = s.transpose(2, 0, 1)
-                s = torch.FloatTensor(s).unsqueeze(0).cuda()
+            action_index = m.sample().item()
 
-                m = torch.distributions.Categorical(logits=self.net(s))
-                action_index = m.sample().item()
+        p = m.probs.squeeze()[action_index]
+        p_action = (1 - eps) * p + eps / N_ACTIONS
+
 
         binary = bin(action_index).lstrip('0b').rjust(3, '0')
 
         action = pystk.Action()
         action.steer = int(binary[0] == '1') * -1.0 + int(binary[1] == '1') * 1.0
-        action.acceleration = int(binary[2] == '1') * 1.0
+        action.acceleration = max(int(binary[2] == '1') * 0.25, 0.01)
 
-        return action, action_index
+        return action, action_index, p_action
 
 
 class HumanPolicy(BasePolicy):
@@ -79,6 +87,6 @@ class HumanPolicy(BasePolicy):
 
         action = pystk.Action()
         action.steer = int(key == 97) * -1.0 + int(key == 100) * 1.0
-        action.acceleration = 0.1
+        action.acceleration = 0.1 * (action.steer == 0.0) + 0.01 * (action.steer != 0.0)
 
-        return action, 0
+        return action, 0, 1.0

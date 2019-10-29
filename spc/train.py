@@ -8,6 +8,7 @@ import torch
 
 from .rollout import RayRollout
 from .replay_buffer import ReplayBuffer
+from .reinforce import REINFORCE
 from . import controller, policy
 from . import utils
 
@@ -52,60 +53,9 @@ class RaySampler(object):
         wandb.log({'fps': (total / clock)}, step=wandb.run.summary['step'])
 
 
-def train(net, optim, replay, config):
-    net.to(config['device'])
-    net.train()
-
-    losses = list()
-
-    for i in range(1000):
-        indices = np.random.choice(len(replay), config['batch_size'])
-        s, a, p_old, g, done = replay[indices]
-
-        s = torch.FloatTensor(s.transpose(0, 3, 1, 2))
-        s = s.to(config['device'])
-
-        a = torch.FloatTensor(a).squeeze()
-        a = a.to(config['device'])
-
-        g = torch.FloatTensor(g)
-        g = g.to(config['device'])
-        g = (g - g.mean()) / (g.std() + 1e-7)
-
-        p_old = torch.FloatTensor(p_old)
-        p_old = p_old.to(config['device'])
-
-        m = torch.distributions.Categorical(logits=net(s))
-        log_p = m.log_prob(a)
-
-        if config['importance_sampling']:
-            rho = torch.exp(log_p) / p_old
-        else:
-            rho = 1.0
-
-        loss = -(rho * g * log_p).sum(1)
-        loss_mean = loss.mean()
-
-        loss_mean.backward()
-        optim.step()
-        optim.zero_grad()
-
-        wandb.run.summary['step'] += 1
-
-        losses.append(loss_mean.item())
-
-        wandb.log({'loss_batch': loss_mean.item()}, step=wandb.run.summary['step'])
-
-    return np.mean(losses)
-
-
 def main(config):
     wandb.init(project='rl', dir=config['dir'], config=config)
     wandb.run.summary['step'] = 0
-
-    net = policy.DeepNet()
-    net.to(config['device'])
-    optim = torch.optim.Adam(net.parameters(), lr=config['lr'])
 
     replay = ReplayBuffer(max_size=50000)
 
@@ -117,14 +67,20 @@ def main(config):
             # controller.TuxController(),
             # max_step=10000)
 
+    if config['algorithm'] == 'reinforce':
+        trainer = REINFORCE(**config)
+    elif config['algorithm'] == 'ppo':
+        trainer = None
+
     for epoch in range(config['max_epoch']+1):
         wandb.run.summary['epoch'] = epoch
 
         returns = list()
         rollouts = list()
 
-        for rollout_batch in RaySampler().get_samples(policy.DeepPolicy(net), gamma=config['gamma']):
+        for rollout_batch in RaySampler().get_samples(trainer.get_policy(), gamma=config['gamma']):
             for rollout, r_total in rollout_batch:
+                # HACK for videos.
                 if len(rollouts) < 16:
                     rollouts.append(rollout)
 
@@ -135,11 +91,13 @@ def main(config):
 
         wandb.log({
             'return': np.mean(returns),
+
+            # REMEMBER
             # 'video': [wandb.Video(utils.make_video(rollouts), format='mp4', fps=20)]
             },
             step=wandb.run.summary['step'])
 
-        loss_epoch = train(net, optim, replay, config)
+        loss_epoch = trainer.train(replay)
 
         wandb.log({'loss': loss_epoch}, step=wandb.run.summary['step'])
 
@@ -147,20 +105,24 @@ def main(config):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--max_epoch', type=int, default=10000)
-    parser.add_argument('--batch_size', type=int, default=256)
-    parser.add_argument('--importance_sampling', action='store_true', default=False)
+    parser.add_argument('--dir', type=str, default='./wandb')
 
     # Optimizer args.
+    parser.add_argument('--algorithm', type=str, default='reinforce')
     parser.add_argument('--lr', type=float, default=1e-2)
+    parser.add_argument('--batch_size', type=int, default=256)
     parser.add_argument('--gamma', type=float, default=0.5)
-    parser.add_argument('--dir', type=str, default='./wandb')
+    parser.add_argument('--importance_sampling', action='store_true', default=False)
 
     parsed = parser.parse_args()
 
     config = {
+            'algorithm': parsed.algorithm,
             'max_epoch': parsed.max_epoch,
-            'dir': parsed.dir,
+
             'device': torch.device('cuda' if torch.cuda.is_available() else 'cpu'),
+            'dir': parsed.dir,
+
             'batch_size': parsed.batch_size,
             'lr': parsed.lr,
             'gamma': parsed.gamma,

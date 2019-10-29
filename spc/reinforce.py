@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 import wandb
 
@@ -17,7 +18,7 @@ class REINFORCE(object):
         self.net.to(device)
         self.optim = torch.optim.Adam(self.net.parameters(), lr=self.lr)
 
-    def train(net, optim, replay, config, n_iterations=1000):
+    def train(self, replay, n_iterations=1000):
         self.net.to(self.device)
         self.net.train()
 
@@ -52,8 +53,8 @@ class REINFORCE(object):
             loss_mean = loss.mean()
 
             loss_mean.backward()
-            optim.step()
-            optim.zero_grad()
+            self.optim.step()
+            self.optim.zero_grad()
 
             wandb.run.summary['step'] += 1
 
@@ -62,3 +63,6 @@ class REINFORCE(object):
             wandb.log({'loss_batch': loss_mean.item()}, step=wandb.run.summary['step'])
 
         return np.mean(losses)
+
+    def get_policy(self):
+        return policy.DeepPolicy(self.net)

@@ -57,6 +57,9 @@ class DeepPolicy(BasePolicy):
         # HACK: deterministic
         with torch.no_grad():
             s = s.transpose(2, 0, 1)
+
+            # REMEMBER
+            # s = torch.FloatTensor(s).unsqueeze(0).cuda()
             s = torch.FloatTensor(s).unsqueeze(0)
 
             m = torch.distributions.Categorical(logits=self.net(s))

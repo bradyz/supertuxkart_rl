@@ -1,6 +1,6 @@
+import wandb
 import numpy as np
 import torch
-import wandb
 
 from . import policy
 

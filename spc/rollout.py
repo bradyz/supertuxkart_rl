@@ -136,6 +136,7 @@ class Rollout(object):
         r_total = 0
 
         d = state.karts[0].distance_down_track
+        s = np.uint8(self.race.render_data[0].image)
 
         for it in range(max_step):
             # Autopilot.
@@ -150,14 +151,14 @@ class Rollout(object):
             # cv2.imshow('image', image)
             # cv2.waitKey(1)
 
-            s = np.uint8(self.race.render_data[0].image)
-
             # Network.
             action, action_i, p_action = policy(s)
             self.race.step(action)
 
             state = pystk.WorldState()
             state.update()
+
+            s_p = np.uint8(self.race.render_data[0].image)
 
             # HACK: fix...
             d_new = state.karts[0].distance_down_track
@@ -169,7 +170,10 @@ class Rollout(object):
             result.append(
                     Data(
                         s.copy(), np.uint8([action_i]), np.float32([p_action]),
-                        np.array([r]), np.array([False])))
+                        np.float32([r]), s_p.copy(),
+                        np.array([r])))
+
+            s = s_p
 
         G_list = list()
         G = 0
@@ -181,8 +185,9 @@ class Rollout(object):
 
         for i, data in enumerate(result):
             result[i] = Data(
-                    data.s, data.a, np.float32([p_action]),
-                    np.float32([G_list[i]]), data.done)
+                    data.s, data.a, data.p_a,
+                    data.r, data.sp,
+                    np.float32([G_list[i]]))
 
         return result, r_total
 

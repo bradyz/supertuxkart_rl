@@ -3,7 +3,7 @@ import collections
 import numpy as np
 
 
-Data = collections.namedtuple('Data', 's a p_a r done')
+Data = collections.namedtuple('Data', 's a p_a r sp R')
 
 
 class Buffer(object):
@@ -30,7 +30,7 @@ class Buffer(object):
 
 
 class ReplayBuffer(object):
-    def __init__(self, max_size=100000):
+    def __init__(self, max_size=40000):
         self.buffers = dict()
         self.max_size = max_size
 

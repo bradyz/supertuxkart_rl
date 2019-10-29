@@ -6,21 +6,21 @@ import ray
 import wandb
 import torch
 
+from . import controller, policy, utils
 from .rollout import RayRollout
 from .replay_buffer import ReplayBuffer
 from .reinforce import REINFORCE
-from . import controller, policy
-from . import utils
+from .ppo import PPO
 
 
-N_WORKERS = 1
+N_WORKERS = 4
 
 
 class RaySampler(object):
     def __init__(self):
         self.rollouts = [RayRollout.remote() for _ in range(N_WORKERS)]
 
-    def get_samples(self, agent, iterations=1, max_step=100, gamma=1.0):
+    def get_samples(self, agent, iterations=10, max_step=1000, gamma=1.0):
         random_track = lambda: np.random.choice(["lighthouse", "zengarden", "hacienda", "sandtrack", "volcano_island"])
         random_track = lambda: np.random.choice(["sandtrack"])
 
@@ -70,7 +70,7 @@ def main(config):
     if config['algorithm'] == 'reinforce':
         trainer = REINFORCE(**config)
     elif config['algorithm'] == 'ppo':
-        trainer = None
+        trainer = PPO(**config)
 
     for epoch in range(config['max_epoch']+1):
         wandb.run.summary['epoch'] = epoch
@@ -91,15 +91,13 @@ def main(config):
 
         wandb.log({
             'return': np.mean(returns),
-
-            # REMEMBER
-            # 'video': [wandb.Video(utils.make_video(rollouts), format='mp4', fps=20)]
+            'video': [wandb.Video(utils.make_video(rollouts), format='mp4', fps=20)]
             },
             step=wandb.run.summary['step'])
 
-        loss_epoch = trainer.train(replay)
+        metrics = trainer.train(replay)
 
-        wandb.log({'loss': loss_epoch}, step=wandb.run.summary['step'])
+        wandb.log(metrics, step=wandb.run.summary['step'])
 
 
 if __name__ == '__main__':
@@ -112,6 +110,7 @@ if __name__ == '__main__':
     parser.add_argument('--lr', type=float, default=1e-2)
     parser.add_argument('--batch_size', type=int, default=256)
     parser.add_argument('--gamma', type=float, default=0.5)
+    parser.add_argument('--eps', type=float, default=0.1)
     parser.add_argument('--importance_sampling', action='store_true', default=False)
 
     parsed = parser.parse_args()
@@ -126,6 +125,7 @@ if __name__ == '__main__':
             'batch_size': parsed.batch_size,
             'lr': parsed.lr,
             'gamma': parsed.gamma,
+            'eps': parsed.eps,
             'importance_sampling': parsed.importance_sampling,
             }
 

@@ -22,6 +22,29 @@ def action_to_numpy(action):
         action.drift, action.nitro])
 
 
+class_color = np.array([
+    0xffffff,  # None
+    0x4e9a06,  # Kart
+    0x2e3436,  # Track
+    0xeeeeec,  # Background
+    0x204a87,  # Pickup
+    0xa40000,  # Bomb
+    0xce5c00,  # Object
+    0x5c3566,  # Projectile
+], dtype='>u4').view(np.uint8).reshape((-1, 4))[:, 1:]
+
+
+def _c(i, m):
+    return m[i % len(m)]
+
+
+def semantic_seg(instance, colorize: bool = True):
+    L = (np.array(instance) >> 24) & 0xff
+    if colorize:
+        return _c(L, class_color)
+    return L
+
+
 class TrackViz:
     def __init__(self, track, visible_range=50):
         from pylab import figure
@@ -63,6 +86,27 @@ class TrackViz:
     def update(self, kart_info, target, action, image=None):
         self.silent_update(kart_info, target, action)
         self.plot(kart_info, image)
+
+def point_from_line(p, a, b):
+    u = p - a
+    u = np.float32([u[0], u[2]])
+
+    v = b - a
+    v = np.float32([v[0], v[2]])
+    v_norm = v / np.linalg.norm(v)
+
+    closest = u.dot(v_norm) * v_norm
+
+    # import matplotlib.pyplot as plt; plt.ion()
+    # plt.clf()
+    # plt.axis('equal')
+    # plt.plot([0, v[0]], [0, v[1]], 'r-')
+    # plt.plot(u[0], u[1], 'bo')
+    # plt.plot(closest[0], closest[1], 'ro')
+    # plt.pause(0.01)
+
+    return np.linalg.norm(u - closest)
+
 
 
 class Rollout(object):
@@ -153,6 +197,17 @@ class Rollout(object):
 
             # Network.
             action, action_i, p_action = policy(s)
+            # s = np.uint8(self.race.render_data[0].image)
+            # lanes = (semantic_seg(self.race.render_data[0].instance, False) == 2).mean()
+
+            # # Network.
+            # action, action_i = policy(s)
+
+            # # HACK: fix...
+            # r = np.linalg.norm(state.karts[0].velocity) + 1.0 * lanes
+            # r_list.append(r)
+            # r_total += r
+
             self.race.step(action)
 
             state = pystk.WorldState()
@@ -162,7 +217,16 @@ class Rollout(object):
 
             # HACK: fix...
             d_new = state.karts[0].distance_down_track
-            r = d_new - d
+
+            node_idx = np.searchsorted(
+                    self.track.path_distance[:, 1],
+                    d_new % self.track.path_distance[-1, 1]) % len(self.track.path_nodes)
+            a_b = self.track.path_nodes[node_idx]
+
+            distance = point_from_line(state.karts[0].location, a_b[0], a_b[1])
+            mult = int(distance < 5.0) * 2.0 - 1.0
+
+            r = (d_new - d)  * mult
             r_list.append(r)
             r_total = max(r_total, d)
             d_new = d

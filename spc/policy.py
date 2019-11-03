@@ -7,7 +7,7 @@ import pystk
 import cv2
 
 
-N_ACTIONS = 8
+N_ACTIONS = 3
 
 
 class BasePolicy:
@@ -73,7 +73,7 @@ class DeepPolicy(BasePolicy):
         p_action = (1 - eps) * p + eps / N_ACTIONS
 
 
-        binary = bin(action_index).lstrip('0b').rjust(3, '0')
+        binary = bin(action_index).lstrip('0b').rjust(N_ACTIONS, '0')
 
         action = pystk.Action()
         action.steer = int(binary[0] == '1') * -1.0 + int(binary[1] == '1') * 1.0
@@ -90,6 +90,6 @@ class HumanPolicy(BasePolicy):
 
         action = pystk.Action()
         action.steer = int(key == 97) * -1.0 + int(key == 100) * 1.0
-        action.acceleration = 0.1 * (action.steer == 0.0) + 0.01 * (action.steer != 0.0)
+        action.acceleration = 0.05 * (action.steer == 0.0) + 0.01 * (action.steer != 0.0)
 
         return action, 0, 1.0

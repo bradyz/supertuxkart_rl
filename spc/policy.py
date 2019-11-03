@@ -7,7 +7,7 @@ import pystk
 import cv2
 
 
-N_ACTIONS = 3
+N_ACTIONS = int(2 ** 3)
 
 
 class BasePolicy:

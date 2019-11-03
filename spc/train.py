@@ -6,7 +6,7 @@ import ray
 import wandb
 import torch
 
-from . import controller, policy, utils
+from . import controller, utils
 from .rollout import RayRollout
 from .replay_buffer import ReplayBuffer
 from .reinforce import REINFORCE

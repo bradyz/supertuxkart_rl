@@ -229,7 +229,7 @@ class Rollout(object):
             r = (d_new - d)  * mult
             r_list.append(r)
             r_total = max(r_total, d)
-            d_new = d
+            d = d_new
 
             result.append(
                     Data(

@@ -73,7 +73,7 @@ class DeepPolicy(BasePolicy):
         p_action = (1 - eps) * p + eps / N_ACTIONS
 
 
-        binary = bin(action_index).lstrip('0b').rjust(N_ACTIONS, '0')
+        binary = bin(action_index).lstrip('0b').rjust(3, '0')
 
         action = pystk.Action()
         action.steer = int(binary[0] == '1') * -1.0 + int(binary[1] == '1') * 1.0

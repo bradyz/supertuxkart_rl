@@ -87,6 +87,7 @@ class TrackViz:
         self.silent_update(kart_info, target, action)
         self.plot(kart_info, image)
 
+
 def point_from_line(p, a, b):
     u = p - a
     u = np.float32([u[0], u[2]])
@@ -162,6 +163,7 @@ class Rollout(object):
             policy: policy.BasePolicy,
             controller: controller.BaseController,
             max_step: float = 100,
+            frame_skip: int = 2,
             restart: bool = True,
             gamma: float = 1.0):
 
@@ -182,7 +184,7 @@ class Rollout(object):
         d = state.karts[0].distance_down_track
         s = np.uint8(self.race.render_data[0].image)
 
-        for it in range(max_step):
+        for it in range(max_step * frame_skip):
             # Autopilot.
             # birdview = self.map.draw_track(state.karts[0])['track']
 
@@ -228,14 +230,17 @@ class Rollout(object):
 
             r = (d_new - d)  * mult
             r_list.append(r)
-            r_total = max(r_total, d)
+            r_total = max(r_total, d_new * mult)
             d = d_new
 
-            result.append(
-                    Data(
-                        s.copy(), np.uint8([action_i]), np.float32([p_action]),
-                        np.float32([r]), s_p.copy(),
-                        np.array([r])))
+            if it % frame_skip == 0:
+                result.append(
+                        Data(
+                            s.copy(),
+                            np.float32([action.steer, action.acceleration, action.drift]),
+                            np.uint8([action_i]), np.float32([p_action]),
+                            np.float32([r]), s_p.copy(),
+                            np.array([r])))
 
             s = s_p
 
@@ -249,7 +254,8 @@ class Rollout(object):
 
         for i, data in enumerate(result):
             result[i] = Data(
-                    data.s, data.a, data.p_a,
+                    data.s,
+                    data.a, data.a_i, data.p_a,
                     data.r, data.sp,
                     np.float32([G_list[i]]))
 
@@ -261,7 +267,7 @@ class Rollout(object):
         pystk.clean()
 
 
-@ray.remote(num_cpus=1, num_gpus=1.0 / 8.0)
+@ray.remote(num_cpus=1, num_gpus=0.2)
 class RayRollout(Rollout):
     pass
 

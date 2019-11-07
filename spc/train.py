@@ -14,14 +14,14 @@ from .ppo import PPO
 from .ddpg import DDPG
 
 
-N_WORKERS = 1
+N_WORKERS = 4
 
 
 class RaySampler(object):
     def __init__(self):
         self.rollouts = [RayRollout.remote() for _ in range(N_WORKERS)]
 
-    def get_samples(self, agent, iterations=10, max_step=1000, gamma=1.0):
+    def get_samples(self, agent, iterations=5, max_step=1000, gamma=1.0):
         random_track = lambda: np.random.choice(["lighthouse", "zengarden", "hacienda", "sandtrack", "volcano_island"])
         random_track = lambda: np.random.choice(["sandtrack"])
 
@@ -55,33 +55,20 @@ class RaySampler(object):
 
 
 def main(config):
-    # wandb.init(project='rl', dir=config['dir'], config=config)
-    # wandb.run.summary['step'] = 0
-    import pickle
-    replay = pickle.load(open('tmp.pkl', 'rb'))
-    trainer = DDPG(**config)
+    wandb.init(project='test', config=config)
+    wandb.run.summary['step'] = 0
 
-    metrics = trainer.train(replay)
-    return
-
-    replay = ReplayBuffer(max_size=500)
+    replay = ReplayBuffer(max_size=40000)
 
     rollout = Rollout()
     rollout.start()
-
-    # from . import policy
-    # episode, _ = rollout.rollout(
-            # policy.HumanPolicy(),
-            # controller.TuxController(),
-            # max_step=100)
-    # for data in episode:
-        # replay.add(data)
-
 
     if config['algorithm'] == 'reinforce':
         trainer = REINFORCE(**config)
     elif config['algorithm'] == 'ppo':
         trainer = PPO(**config)
+    elif config['algorithm'] == 'ddpg':
+        trainer = DDPG(**config)
 
     for epoch in range(config['max_epoch']+1):
         wandb.run.summary['epoch'] = epoch
@@ -114,13 +101,12 @@ def main(config):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--max_epoch', type=int, default=10000)
-    parser.add_argument('--dir', type=str, default='./wandb')
 
     # Optimizer args.
     parser.add_argument('--algorithm', type=str, default='reinforce')
-    parser.add_argument('--lr', type=float, default=1e-2)
-    parser.add_argument('--batch_size', type=int, default=256)
-    parser.add_argument('--gamma', type=float, default=0.5)
+    parser.add_argument('--lr', type=float, default=1e-4)
+    parser.add_argument('--batch_size', type=int, default=512)
+    parser.add_argument('--gamma', type=float, default=0.9)
     parser.add_argument('--eps', type=float, default=0.1)
     parser.add_argument('--importance_sampling', action='store_true', default=False)
 
@@ -131,7 +117,6 @@ if __name__ == '__main__':
             'max_epoch': parsed.max_epoch,
 
             'device': torch.device('cuda' if torch.cuda.is_available() else 'cpu'),
-            'dir': parsed.dir,
 
             'batch_size': parsed.batch_size,
             'lr': parsed.lr,

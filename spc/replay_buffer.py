@@ -3,7 +3,7 @@ import collections
 import numpy as np
 
 
-Data = collections.namedtuple('Data', 's a p_a r sp R')
+Data = collections.namedtuple('Data', 's a a_i p_a r sp R')
 
 
 class Buffer(object):

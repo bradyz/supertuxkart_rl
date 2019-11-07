@@ -7,13 +7,14 @@ import wandb
 import torch
 
 from . import controller, utils
-from .rollout import RayRollout
+from .rollout import RayRollout, Rollout
 from .replay_buffer import ReplayBuffer
 from .reinforce import REINFORCE
 from .ppo import PPO
+from .ddpg import DDPG
 
 
-N_WORKERS = 4
+N_WORKERS = 1
 
 
 class RaySampler(object):
@@ -54,18 +55,28 @@ class RaySampler(object):
 
 
 def main(config):
-    wandb.init(project='rl', dir=config['dir'], config=config)
-    wandb.run.summary['step'] = 0
+    # wandb.init(project='rl', dir=config['dir'], config=config)
+    # wandb.run.summary['step'] = 0
+    import pickle
+    replay = pickle.load(open('tmp.pkl', 'rb'))
+    trainer = DDPG(**config)
 
-    replay = ReplayBuffer(max_size=50000)
+    metrics = trainer.train(replay)
+    return
 
-    # rollout = Rollout()
-    # rollout.start()
+    replay = ReplayBuffer(max_size=500)
 
-    # episode = rollout.rollout(
-            # policy.DeepPolicy(net),
+    rollout = Rollout()
+    rollout.start()
+
+    # from . import policy
+    # episode, _ = rollout.rollout(
+            # policy.HumanPolicy(),
             # controller.TuxController(),
-            # max_step=10000)
+            # max_step=100)
+    # for data in episode:
+        # replay.add(data)
+
 
     if config['algorithm'] == 'reinforce':
         trainer = REINFORCE(**config)

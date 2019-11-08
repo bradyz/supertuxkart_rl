@@ -27,7 +27,7 @@ class PPO(object):
         self.optim_critic = torch.optim.Adam(self.critic.parameters(), lr=self.lr)
         self.optim_actor = torch.optim.Adam(self.actor.parameters(), lr=self.lr)
 
-    def train(self, replay, n_iterations=1000):
+    def train(self, replay, n_iterations=100):
         self.actor.to(self.device)
         self.actor.train()
 
@@ -41,7 +41,7 @@ class PPO(object):
 
         for i in tqdm.tqdm(range(n_iterations)):
             indices = np.random.choice(len(replay), self.batch_size)
-            s, a, p_a, r, sp, R = replay[indices]
+            s, a, a_i, p_a, r, sp, R = replay[indices]
 
             s = torch.FloatTensor(s.transpose(0, 3, 1, 2))
             s = s.to(self.device)
@@ -49,8 +49,8 @@ class PPO(object):
             sp = torch.FloatTensor(sp.transpose(0, 3, 1, 2))
             sp = sp.to(self.device)
 
-            a = torch.FloatTensor(a).squeeze()
-            a = a.to(self.device)
+            a_i = torch.FloatTensor(a_i).squeeze()
+            a_i = a_i.to(self.device)
 
             r = torch.FloatTensor(r).squeeze()
             r = r.to(self.device)
@@ -63,7 +63,7 @@ class PPO(object):
             # R = (R - R.mean()) / (R.std() + 1e-7)
 
             m = torch.distributions.Categorical(logits=self.actor(s))
-            log_p = m.log_prob(a)
+            log_p = m.log_prob(a_i)
 
             V_s = self.critic(s).squeeze()
             V_sp = self.critic(sp).squeeze()
@@ -76,28 +76,25 @@ class PPO(object):
 
             objective = torch.min(rho * A, torch.clamp(rho, 1 - self.eps, 1 + self.eps) * A)
 
-            loss_actor = -objective
-            loss_actor_mean = loss_actor.mean()
+            loss_actor = -objective.mean()
+            loss_critic = ((V_s - R) ** 2).mean()
 
-            loss_critic = ((V_s - R) ** 2)
-            loss_critic_mean = loss_critic.mean()
-
-            loss_critic_mean.backward()
+            loss_critic.backward()
             self.optim_critic.step()
             self.optim_critic.zero_grad()
 
-            loss_actor_mean.backward()
+            loss_actor.backward()
             self.optim_actor.step()
             self.optim_actor.zero_grad()
 
             wandb.run.summary['step'] += 1
 
-            losses_critic.append(loss_critic_mean.item())
-            losses_actor.append(loss_actor_mean.item())
+            losses_critic.append(loss_critic.item())
+            losses_actor.append(loss_actor.item())
 
             wandb.log({
-                'batch/actor': loss_actor_mean.item(),
-                'batch/critic': loss_critic_mean.item(),
+                'batch/actor': loss_actor.item(),
+                'batch/critic': loss_critic.item(),
                 },
                 step=wandb.run.summary['step'])
 

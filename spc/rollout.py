@@ -1,3 +1,4 @@
+from collections import deque
 from typing import Dict
 
 import pystk
@@ -184,6 +185,9 @@ class Rollout(object):
         d = state.karts[0].distance_down_track
         s = np.uint8(self.race.render_data[0].image)
 
+        off_track = deque(maxlen=50)
+        velocity = deque(maxlen=50)
+
         for it in range(max_step * frame_skip):
             # Autopilot.
             # birdview = self.map.draw_track(state.karts[0])['track']
@@ -232,6 +236,12 @@ class Rollout(object):
             r_list.append(r)
             r_total = max(r_total, d_new * mult)
             d = d_new
+
+            velocity.append(np.linalg.norm(state.karts[0].velocity))
+            off_track.append(distance > 5)
+
+            if it > 100 and ((sum(velocity) / len(velocity) < 1.0 or all(off_track))):
+                break
 
             if it % frame_skip == 0:
                 result.append(

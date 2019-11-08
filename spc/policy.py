@@ -53,7 +53,7 @@ class DeepPolicy(BasePolicy):
         self.net = net
         self.net.eval()
 
-    def __call__(self, s, eps=0.05):
+    def __call__(self, s, eps=0.1):
         # HACK: deterministic
         with torch.no_grad():
             s = s.transpose(2, 0, 1)
@@ -71,7 +71,6 @@ class DeepPolicy(BasePolicy):
 
         p = m.probs.squeeze()[action_index]
         p_action = (1 - eps) * p + eps / N_ACTIONS
-
 
         binary = bin(action_index).lstrip('0b').rjust(3, '0')
 

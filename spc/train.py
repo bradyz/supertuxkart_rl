@@ -21,7 +21,7 @@ class RaySampler(object):
     def __init__(self):
         self.rollouts = [RayRollout.remote() for _ in range(N_WORKERS)]
 
-    def get_samples(self, agent, iterations=5, max_step=1000, gamma=1.0):
+    def get_samples(self, agent, max_step=2000, gamma=1.0):
         random_track = lambda: np.random.choice(["lighthouse", "zengarden", "hacienda", "sandtrack", "volcano_island"])
         random_track = lambda: np.random.choice(["sandtrack"])
 
@@ -30,7 +30,7 @@ class RaySampler(object):
         tick = time.time()
         total = 0
 
-        for _ in range(iterations):
+        while total <= 10000:
             batch_ros = list()
 
             for rollout in self.rollouts:

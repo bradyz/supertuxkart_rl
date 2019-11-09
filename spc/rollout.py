@@ -230,7 +230,7 @@ class Rollout(object):
             a_b = self.track.path_nodes[node_idx]
 
             distance = point_from_line(state.karts[0].location, a_b[0], a_b[1])
-            mult = int(distance < 5.0) * 2.0 - 1.0
+            mult = int(distance < 7.5) * 2.0 - 1.0
 
             r = (d_new - d)  * mult
             r_list.append(r)
@@ -238,9 +238,9 @@ class Rollout(object):
             d = d_new
 
             velocity.append(np.linalg.norm(state.karts[0].velocity))
-            off_track.append(distance > 5)
+            off_track.append(distance > 7.5)
 
-            if it > 100 and ((sum(velocity) / len(velocity) < 1.0 or all(off_track))):
+            if it > 50 and ((sum(velocity) / len(velocity) < 0.5 or all(off_track))):
                 break
 
             if it % frame_skip == 0:

@@ -54,7 +54,7 @@ class DDPG(object):
 
         for i in tqdm.tqdm(range(n_iterations)):
             indices = np.random.choice(len(replay), self.batch_size)
-            s, a, p_a, r, sp, R = replay[indices]
+            s, a, a_i, p_a, r, sp, R = replay[indices]
 
             s = torch.FloatTensor(s.transpose(0, 3, 1, 2))
             s = s.to(self.device)
@@ -63,10 +63,7 @@ class DDPG(object):
             sp = sp.to(self.device)
 
             a = torch.FloatTensor(a).squeeze()
-            a = a.to(self.device)
-
-            # PLEASE
-            a = torch.stack(2 * [a], 1)
+            a = a.to(self.device)[:,:2]
 
             r = torch.FloatTensor(r).squeeze()
             r = r.to(self.device)

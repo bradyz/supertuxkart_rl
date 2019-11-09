@@ -7,7 +7,7 @@ import pystk
 import cv2
 
 
-N_ACTIONS = int(2 ** 3)
+N_ACTIONS = int(2 ** 4)
 
 
 class BasePolicy:
@@ -53,7 +53,7 @@ class DeepPolicy(BasePolicy):
         self.net = net
         self.net.eval()
 
-    def __call__(self, s, eps=0.1):
+    def __call__(self, s, eps=0.05):
         # HACK: deterministic
         with torch.no_grad():
             s = s.transpose(2, 0, 1)
@@ -65,18 +65,20 @@ class DeepPolicy(BasePolicy):
             m = torch.distributions.Categorical(logits=self.net(s))
 
         if np.random.rand() < eps:
-            action_index = np.random.choice(list(range(8)))
+            action_index = np.random.choice(list(range(16)))
         else:
             action_index = m.sample().item()
 
         p = m.probs.squeeze()[action_index]
         p_action = (1 - eps) * p + eps / N_ACTIONS
 
-        binary = bin(action_index).lstrip('0b').rjust(3, '0')
+        binary = bin(action_index).lstrip('0b').rjust(4, '0')
 
         action = pystk.Action()
         action.steer = int(binary[0] == '1') * -1.0 + int(binary[1] == '1') * 1.0
         action.acceleration = max(int(binary[2] == '1') * 0.25, 0.01)
+        action.drift = int(binary[3] == '1')
+        action.rescue = False
 
         return action, action_index, p_action
 

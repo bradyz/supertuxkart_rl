@@ -19,7 +19,7 @@ class REINFORCE(object):
         self.net.to(device)
         self.optim = torch.optim.Adam(self.net.parameters(), lr=self.lr)
 
-    def train(self, replay, n_iterations=1000):
+    def train(self, replay, n_iterations=100):
         self.net.to(self.device)
         self.net.train()
 
@@ -38,6 +38,8 @@ class REINFORCE(object):
             R = torch.FloatTensor(R)
             R = R.to(self.device)
             R = (R - R.mean()) / (R.std() + 1e-7)
+
+            R = torch.clamp(R, -1.0, 1.0)
 
             p_a = torch.FloatTensor(p_a)
             p_a = p_a.to(self.device)
@@ -82,7 +84,7 @@ class Network(torch.nn.Module):
         self.conv3 = torch.nn.Conv2d(64, 64, 3, 1)
 
         self.fc4 = torch.nn.Linear(4 * 4 * 64, 512)
-        self.fc5 = torch.nn.Linear(512, 8)
+        self.fc5 = torch.nn.Linear(512, 16)
 
     def forward(self, x):
         x = self.norm(x.mean(1, True))

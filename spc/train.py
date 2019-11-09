@@ -23,12 +23,13 @@ class RaySampler(object):
 
     def get_samples(self, agent, max_step=2000, gamma=1.0):
         random_track = lambda: np.random.choice(["lighthouse", "zengarden", "hacienda", "sandtrack", "volcano_island"])
-        random_track = lambda: np.random.choice(["sandtrack"])
+        random_track = lambda: np.random.choice(["lighthouse"])
 
         [ray.get(rollout.start.remote(track=random_track())) for rollout in self.rollouts]
 
         tick = time.time()
         total = 0
+        total_episodes = 0
 
         while total <= 10000:
             batch_ros = list()
@@ -40,6 +41,7 @@ class RaySampler(object):
 
             batch_ros = [ray.get(ro) for ro in batch_ros]
             total += sum(len(x[0]) for x in batch_ros)
+            total_episodes += len(batch_ros)
 
             yield batch_ros
 
@@ -47,18 +49,25 @@ class RaySampler(object):
 
         print('FPS: %.2f' % (total / clock))
         print('Count: %d' % (total))
+        print('Episodes: %d' % (total_episodes))
         print('Time: %.2f' % clock)
 
         [ray.get(rollout.stop.remote()) for rollout in self.rollouts]
 
-        wandb.log({'fps': (total / clock)}, step=wandb.run.summary['step'])
+        wandb.run.summary['frames'] = wandb.run.summary.get('frames', 0) + total
+
+        wandb.log({
+            'fps': (total / clock),
+            'episodes': total_episodes,
+            'frames': wandb.run.summary['frames'],
+            }, step=wandb.run.summary['step'])
 
 
 def main(config):
     wandb.init(project='test', config=config)
     wandb.run.summary['step'] = 0
 
-    replay = ReplayBuffer(max_size=40000)
+    replay = ReplayBuffer(max_size=10000)
 
     rollout = Rollout()
     rollout.start()
@@ -74,13 +83,12 @@ def main(config):
         wandb.run.summary['epoch'] = epoch
 
         returns = list()
-        rollouts = list()
+        video_rollouts = list()
 
         for rollout_batch in RaySampler().get_samples(trainer.get_policy(), gamma=config['gamma']):
             for rollout, r_total in rollout_batch:
-                # HACK for videos.
-                if len(rollouts) < 16:
-                    rollouts.append(rollout)
+                if len(video_rollouts) < 64:
+                    video_rollouts.append(rollout)
 
                 returns.append(r_total)
 
@@ -89,7 +97,7 @@ def main(config):
 
         wandb.log({
             'return': np.mean(returns),
-            'video': [wandb.Video(utils.make_video(rollouts), format='mp4', fps=20)]
+            'video': [wandb.Video(utils.make_video(video_rollouts), format='mp4', fps=20)]
             },
             step=wandb.run.summary['step'])
 

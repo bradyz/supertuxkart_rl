@@ -113,7 +113,7 @@ class Network(torch.nn.Module):
     def __init__(self, n_outputs):
         super().__init__()
 
-        self.norm = torch.nn.BatchNorm2d(3)
+        self.norm = torch.nn.BatchNorm2d(1)
         self.conv1 = torch.nn.Conv2d(3, 32, kernel_size=8, stride=4)
         self.conv2 = torch.nn.Conv2d(32, 64, 4, 2)
         self.conv3 = torch.nn.Conv2d(64, 64, 3, 1)
@@ -122,7 +122,7 @@ class Network(torch.nn.Module):
         self.fc5 = torch.nn.Linear(512, n_outputs)
 
     def forward(self, x):
-        x = self.norm(x)
+        x = self.norm(x.mean(1, True))
         x = F.relu(self.conv1(x))
         x = F.relu(self.conv2(x))
         x = F.relu(self.conv3(x))

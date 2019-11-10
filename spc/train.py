@@ -6,60 +6,69 @@ import ray
 import wandb
 import torch
 
-from . import controller, utils
-from .rollout import RayRollout, Rollout
+from .utils import make_video
+from .rollout import RayRollout
 from .replay_buffer import ReplayBuffer
 from .reinforce import REINFORCE
 from .ppo import PPO
 from .ddpg import DDPG
 
 
-N_WORKERS = 4
+N_WORKERS = 5
 
 
 class RaySampler(object):
     def __init__(self):
-        self.rollouts = [RayRollout.remote() for _ in range(N_WORKERS)]
-
-    def get_samples(self, agent, max_step=2000, gamma=1.0):
         random_track = lambda: np.random.choice(["lighthouse", "zengarden", "hacienda", "sandtrack", "volcano_island"])
-        random_track = lambda: np.random.choice(["lighthouse"])
+        random_track = lambda: np.random.choice(["sandtrack"])
 
-        [ray.get(rollout.start.remote(track=random_track())) for rollout in self.rollouts]
+        self.rollouts = [RayRollout.remote(random_track()) for _ in range(N_WORKERS)]
 
+    def get_samples(self, agent, max_frames=10000, max_step=2000, gamma=1.0, frame_skip=0, **kwargs):
         tick = time.time()
-        total = 0
-        total_episodes = 0
+        total_frames = 0
+        returns = list()
+        video_rollouts = list()
 
-        while total <= 10000:
+        while total_frames <= max_frames:
             batch_ros = list()
 
             for rollout in self.rollouts:
-                batch_ros.append(rollout.rollout.remote(
-                        agent, controller.TuxController(),
-                        max_step=max_step, restart=True, gamma=gamma))
+                batch_ros.append(
+                        rollout.rollout.remote(
+                            agent,
+                            max_step=max_step, gamma=gamma, frame_skip=frame_skip))
 
             batch_ros = [ray.get(ro) for ro in batch_ros]
-            total += sum(len(x[0]) for x in batch_ros)
-            total_episodes += len(batch_ros)
+
+            if len(video_rollouts) < 64:
+                video_rollouts.extend([ro for ro, ret in batch_ros])
+
+            total_frames += sum(len(ro) * (frame_skip + 1) for ro, ret in batch_ros)
+            returns.extend([ret for ro, ret in batch_ros])
 
             yield batch_ros
 
         clock = time.time() - tick
 
-        print('FPS: %.2f' % (total / clock))
-        print('Count: %d' % (total))
-        print('Episodes: %d' % (total_episodes))
+        print('FPS: %.2f' % (total_frames / clock))
+        print('Count: %d' % (total_frames))
+        print('Episodes: %d' % (len(returns)))
         print('Time: %.2f' % clock)
+        print('Return: %.2f' % np.mean(returns))
 
-        [ray.get(rollout.stop.remote()) for rollout in self.rollouts]
-
-        wandb.run.summary['frames'] = wandb.run.summary.get('frames', 0) + total
+        wandb.run.summary['frames'] = wandb.run.summary.get('frames', 0) + total_frames
+        wandb.run.summary['episodes'] = wandb.run.summary.get('episodes', 0) + len(returns)
 
         wandb.log({
-            'fps': (total / clock),
-            'episodes': total_episodes,
-            'frames': wandb.run.summary['frames'],
+            'video': [wandb.Video(make_video(video_rollouts), format='mp4', fps=20)],
+
+            'epoch/fps': (total_frames / clock),
+            'epoch/episodes': len(returns),
+            'epoch/return': np.mean(returns),
+
+            'total/frames': wandb.run.summary['frames'],
+            'total/episodes': wandb.run.summary['episodes'],
             }, step=wandb.run.summary['step'])
 
 
@@ -67,39 +76,23 @@ def main(config):
     wandb.init(project='test', config=config)
     wandb.run.summary['step'] = 0
 
-    replay = ReplayBuffer(max_size=10000)
+    trainer = {
+            'reinforce': REINFORCE,
+            'ppo': PPO,
+            'ddpg': DDPG,
+            }[config['algorithm']](**config)
 
-    rollout = Rollout()
-    rollout.start()
-
-    if config['algorithm'] == 'reinforce':
-        trainer = REINFORCE(**config)
-    elif config['algorithm'] == 'ppo':
-        trainer = PPO(**config)
-    elif config['algorithm'] == 'ddpg':
-        trainer = DDPG(**config)
+    sampler = RaySampler()
 
     for epoch in range(config['max_epoch']+1):
         wandb.run.summary['epoch'] = epoch
 
-        returns = list()
-        video_rollouts = list()
+        replay = ReplayBuffer(config['max_frames'])
 
-        for rollout_batch in RaySampler().get_samples(trainer.get_policy(), gamma=config['gamma']):
-            for rollout, r_total in rollout_batch:
-                if len(video_rollouts) < 64:
-                    video_rollouts.append(rollout)
-
-                returns.append(r_total)
-
+        for rollout_batch in sampler.get_samples(trainer.get_policy(epoch), **config):
+            for rollout, _ in rollout_batch:
                 for data in rollout:
                     replay.add(data)
-
-        wandb.log({
-            'return': np.mean(returns),
-            'video': [wandb.Video(utils.make_video(video_rollouts), format='mp4', fps=20)]
-            },
-            step=wandb.run.summary['step'])
 
         metrics = trainer.train(replay)
 
@@ -113,23 +106,31 @@ if __name__ == '__main__':
     # Optimizer args.
     parser.add_argument('--algorithm', type=str, default='reinforce')
     parser.add_argument('--lr', type=float, default=1e-4)
+    parser.add_argument('--iterations', type=int, default=100)
     parser.add_argument('--batch_size', type=int, default=512)
+    parser.add_argument('--max_frames', type=int, default=5000)
+    parser.add_argument('--frame_skip', type=int, default=0)
     parser.add_argument('--gamma', type=float, default=0.9)
     parser.add_argument('--eps', type=float, default=0.1)
+    parser.add_argument('--clip', type=float, default=0.1)
     parser.add_argument('--importance_sampling', action='store_true', default=False)
 
     parsed = parser.parse_args()
 
     config = {
             'algorithm': parsed.algorithm,
-            'max_epoch': parsed.max_epoch,
+            'frame_skip': parsed.frame_skip,
+            'max_frames': parsed.max_frames,
+            'gamma': parsed.gamma,
 
+            'max_epoch': parsed.max_epoch,
             'device': torch.device('cuda' if torch.cuda.is_available() else 'cpu'),
 
             'batch_size': parsed.batch_size,
-            'lr': parsed.lr,
-            'gamma': parsed.gamma,
             'eps': parsed.eps,
+            'lr': parsed.lr,
+            'iterations': parsed.iterations,
+            'clip': parsed.clip,
             'importance_sampling': parsed.importance_sampling,
             }
 

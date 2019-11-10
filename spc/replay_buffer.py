@@ -30,7 +30,7 @@ class Buffer(object):
 
 
 class ReplayBuffer(object):
-    def __init__(self, max_size=40000):
+    def __init__(self, max_size):
         self.buffers = dict()
         self.max_size = max_size
 

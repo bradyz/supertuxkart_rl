@@ -15,16 +15,6 @@ class BasePolicy:
         raise NotImplementedError("BasePolicy.__call__")
 
 
-class RewardPolicy(BasePolicy):
-    def __init__(self, reward_fun):
-        self.reward_fun = reward_fun
-
-    def __call__(self, m: Dict):
-        r = self.reward_fun(m)
-
-        return np.unravel_index(np.argmax(r), r.shape)
-
-
 class DeepNet(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -48,49 +38,48 @@ class DeepNet(torch.nn.Module):
         return x
 
 
-class DeepPolicy(BasePolicy):
-    def __init__(self, net):
+class DiscretePolicy(BasePolicy):
+    def __init__(self, net, n_actions, eps):
         self.net = net
         self.net.eval()
 
-    def __call__(self, s, eps=0.05):
-        # HACK: deterministic
+        self.n_actions = n_actions
+        self.eps = eps
+
+    def __call__(self, s, v):
         with torch.no_grad():
             s = s.transpose(2, 0, 1)
-
-            # REMEMBER
             s = torch.FloatTensor(s).unsqueeze(0).cuda()
-            # s = torch.FloatTensor(s).unsqueeze(0)
-
             m = torch.distributions.Categorical(logits=self.net(s))
 
-        if np.random.rand() < eps:
-            action_index = np.random.choice(list(range(16)))
+        if np.random.rand() < self.eps:
+            action_index = np.random.choice(list(range(self.n_actions)))
         else:
             action_index = m.sample().item()
 
         p = m.probs.squeeze()[action_index]
-        p_action = (1 - eps) * p + eps / N_ACTIONS
+        p_action = (1 - self.eps) * p + self.eps / N_ACTIONS
 
         binary = bin(action_index).lstrip('0b').rjust(4, '0')
 
         action = pystk.Action()
         action.steer = int(binary[0] == '1') * -1.0 + int(binary[1] == '1') * 1.0
-        action.acceleration = max(int(binary[2] == '1') * 0.25, 0.01)
-        action.drift = int(binary[3] == '1')
-        action.rescue = False
+        action.acceleration = np.clip(5 + int(binary[2] == '1') * 20.0 - v, 0, 0.5)
+        action.drift = binary[3] == '1'
 
         return action, action_index, p_action
 
 
 class HumanPolicy(BasePolicy):
-    def __call__(self, s):
+    def __call__(self, s, v):
         cv2.imshow('s', cv2.cvtColor(s, cv2.COLOR_BGR2RGB))
 
-        key = cv2.waitKey(10)
+        key = cv2.waitKey(1)
+
+        import time; time.sleep(1.0 / 5.0)
 
         action = pystk.Action()
         action.steer = int(key == 97) * -1.0 + int(key == 100) * 1.0
-        action.acceleration = 0.05 * (action.steer == 0.0) + 0.01 * (action.steer != 0.0)
+        action.acceleration = np.clip(1 + int(action.steer == 0) * 20.0 - v, 0, 0.5)
 
         return action, 0, 1.0

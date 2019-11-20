@@ -19,10 +19,11 @@ N_WORKERS = 5
 
 class RaySampler(object):
     def __init__(self):
-        random_track = lambda: np.random.choice(["lighthouse", "zengarden", "hacienda", "sandtrack", "volcano_island"])
-        random_track = lambda: np.random.choice(["sandtrack"])
+        random_track = lambda: np.random.choice(["lighthouse"])
+        random_track = lambda: np.random.choice(["lighthouse", "zengarden", "hacienda", "snowtuxpeak", "cornfield_crossing"])
+        tracks = ["lighthouse", "zengarden", "hacienda", "snowtuxpeak", "cornfield_crossing"]
 
-        self.rollouts = [RayRollout.remote(random_track()) for _ in range(N_WORKERS)]
+        self.rollouts = [RayRollout.remote(track) for track in tracks]
 
     def get_samples(self, agent, max_frames=10000, max_step=2000, gamma=1.0, frame_skip=0, **kwargs):
         tick = time.time()

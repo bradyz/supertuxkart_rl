@@ -1,11 +1,10 @@
 from collections import deque
-from typing import Dict
 
 import pystk
 import ray
 import numpy as np
 
-from . import controller, policy
+from . import policy
 from .replay_buffer import Data
 
 
@@ -74,11 +73,11 @@ class Rollout(object):
         s = np.array(self.race.render_data[0].image)
 
         off_track = deque(maxlen=20)
-        no_progress = deque(maxlen=20)
+        no_progress = deque(maxlen=50)
 
         for it in range(max_step):
             # Early termination.
-            if it > len(off_track) and ((all(no_progress) or all(off_track))):
+            if it > 100 and (all(no_progress) or all(off_track)):
                 break
 
             v = np.linalg.norm(state.karts[0].velocity)
@@ -102,12 +101,16 @@ class Rollout(object):
             distance = point_from_line(state.karts[0].location, a_b[0], a_b[1])
             mult = int(distance < 8.0) * 2.0 - 1.0
 
-            # Weight this?
+            # HACK: finisted the race?
+            if abs(d_new - farthest) > 100.0:
+                break
+
+            no_progress.append(d_new < farthest)
+            off_track.append(distance > 8.0)
+
             farthest = max(farthest, d_new)
             r_total = max(r_total, d_new * mult)
             r = np.clip(max(r_total - d, 0) + 0.5 * mult, -1.0, 1.0)
-            no_progress.append(d_new < farthest)
-            off_track.append(distance > 8.0)
 
             result.append(
                     Data(
@@ -147,11 +150,9 @@ class RayRollout(Rollout):
 
 
 if __name__ == "__main__":
-    rollout = Rollout()
-    rollout.start()
+    rollout = Rollout('lighthouse')
 
     episode = rollout.rollout(
             # policy.RewardPolicy(Reward),
             policy.HumanPolicy(),
-            controller.TuxController(),
-            max_step=1000)
+            max_step=1000000)

@@ -76,10 +76,10 @@ class HumanPolicy(BasePolicy):
 
         key = cv2.waitKey(1)
 
-        import time; time.sleep(1.0 / 5.0)
+        import time; time.sleep(1.0 / 10.0)
 
         action = pystk.Action()
         action.steer = int(key == 97) * -1.0 + int(key == 100) * 1.0
-        action.acceleration = np.clip(1 + int(action.steer == 0) * 20.0 - v, 0, 0.5)
+        action.acceleration = np.clip(5 + int(action.steer == 0) * 90.0 - v, 0, 0.5)
 
         return action, 0, 1.0

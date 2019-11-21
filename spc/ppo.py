@@ -45,7 +45,7 @@ class PPO(object):
 
         for i in range(self.iterations):
             indices = np.random.choice(len(replay), self.batch_size)
-            s, a, a_i, p_a, r, sp, R = replay[indices]
+            s, a, a_i, p_a, r, sp, R, done = replay[indices]
 
             s = torch.FloatTensor(s.transpose(0, 3, 1, 2)).to(self.device)
             sp = torch.FloatTensor(sp.transpose(0, 3, 1, 2)).to(self.device)

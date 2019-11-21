@@ -29,6 +29,16 @@ def point_from_line(p, a, b):
     return np.linalg.norm(u - closest)
 
 
+def get_distance(d_new, d, track_length):
+    if abs(d_new - d) > 100:
+        sign = float(d_new < d) * 2 - 1
+        d_new, d = min(d_new, d), max(d_new, d)
+
+        return sign * ((d_new - d) % track_length)
+
+    return d_new - d
+
+
 class Rollout(object):
     def __init__(self, track):
         config = pystk.GraphicsConfig.ld()
@@ -67,17 +77,15 @@ class Rollout(object):
         state.update()
 
         r_total = 0
-        farthest = 0
-
         d = state.karts[0].distance_down_track
         s = np.array(self.race.render_data[0].image)
 
         off_track = deque(maxlen=20)
-        no_progress = deque(maxlen=50)
+        traveled = deque(maxlen=50)
 
         for it in range(max_step):
             # Early termination.
-            if it > 100 and (all(no_progress) or all(off_track)):
+            if it > 20 and (np.median(traveled) < 0.05 or all(off_track)):
                 break
 
             v = np.linalg.norm(state.karts[0].velocity)
@@ -99,18 +107,15 @@ class Rollout(object):
             a_b = self.track.path_nodes[node_idx]
 
             distance = point_from_line(state.karts[0].location, a_b[0], a_b[1])
-            mult = int(distance < 8.0) * 2.0 - 1.0
+            mult = int(distance < 9.0) * 2.0 - 1.0
+            distance_traveled = get_distance(d_new, d, self.track.path_distance[-1, 1])
+            gain = distance_traveled if distance_traveled > 0 else 0
 
-            # HACK: finisted the race?
-            if abs(d_new - farthest) > 100.0:
-                break
+            traveled.append(gain)
+            off_track.append(distance > 9.0)
 
-            no_progress.append(d_new < farthest)
-            off_track.append(distance > 8.0)
-
-            farthest = max(farthest, d_new)
             r_total = max(r_total, d_new * mult)
-            r = np.clip(max(r_total - d, 0) + 0.5 * mult, -1.0, 1.0)
+            r = np.clip(0.5 * max(mult * gain, 0) + 0.5 * mult, -1.0, 0.60)
 
             result.append(
                     Data(
@@ -118,7 +123,8 @@ class Rollout(object):
                         np.float32([action.steer, action.acceleration, action.drift]),
                         np.uint8([action_i]), np.float32([p_action]),
                         np.float32([r]), s_p.copy(),
-                        np.float32([np.nan])))
+                        np.float32([np.nan]),
+                        np.float32([0])))
 
             d = d_new
             s = s_p
@@ -132,9 +138,11 @@ class Rollout(object):
                     data.s,
                     data.a, data.a_i, data.p_a,
                     data.r, data.sp,
-                    np.float32([G]))
+                    np.float32([G]),
+                    np.float32([i == 0]))
 
-        return result, r_total
+        # HACK PLEASE REMEMBER THIS
+        return result[4:], r_total / self.track.path_distance[-1, 1]
 
     def __del__(self):
         self.race.stop()

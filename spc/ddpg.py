@@ -1,38 +1,38 @@
+import pystk
 import wandb
 import numpy as np
 import torch
 import torch.nn.functional as F
 
-from . import policy
+from .policy import BasePolicy
 
 
-N_ACTIONS = 2
+N_ACTIONS = 3
 
 
 class DDPG(object):
-    def __init__(self, batch_size, lr, gamma, eps, device, **kwargs):
+    def __init__(self, batch_size, iterations, lr, lr_1, gamma, eps, tau, device, **kwargs):
         self.batch_size = batch_size
         self.lr = lr
+        self.lr_1 = lr_1
         self.gamma = gamma
         self.eps = eps
+        self.tau = tau
+        self.iterations = iterations
 
         self.device = device
 
         self.actor = Actor(N_ACTIONS)
-        self.actor.to(device)
-
+        self.actor.to(self.device)
         self.actor_target = Actor(N_ACTIONS)
-        self.actor_target.to(device)
-
+        self.actor_target.to(self.device)
         self.optim_actor = torch.optim.Adam(self.actor.parameters(), lr=self.lr)
 
         self.critic = Critic(N_ACTIONS)
-        self.critic.to(device)
-
+        self.critic.to(self.device)
         self.critic_target = Critic(N_ACTIONS)
-        self.critic_target.to(device)
-
-        self.optim_critic = torch.optim.Adam(self.critic.parameters(), lr=self.lr)
+        self.critic_target.to(self.device)
+        self.optim_critic = torch.optim.Adam(self.critic.parameters(), lr=self.lr_1)
 
         for u, v in zip(self.actor.parameters(), self.actor_target.parameters()):
             u.data.copy_(v.data)
@@ -40,7 +40,7 @@ class DDPG(object):
         for u, v in zip(self.critic.parameters(), self.critic_target.parameters()):
             u.data.copy_(v.data)
 
-    def train(self, replay, n_iterations=1000):
+    def train(self, replay):
         self.actor.to(self.device)
         self.actor.train()
 
@@ -50,11 +50,9 @@ class DDPG(object):
         losses_actor = list()
         losses_critic = list()
 
-        import tqdm
-
-        for i in tqdm.tqdm(range(n_iterations)):
+        for i in range(self.iterations):
             indices = np.random.choice(len(replay), self.batch_size)
-            s, a, a_i, p_a, r, sp, R = replay[indices]
+            s, a, _, _, r, sp, _, done = replay[indices]
 
             s = torch.FloatTensor(s.transpose(0, 3, 1, 2))
             s = s.to(self.device)
@@ -63,52 +61,62 @@ class DDPG(object):
             sp = sp.to(self.device)
 
             a = torch.FloatTensor(a).squeeze()
-            a = a.to(self.device)[:,:2]
+            a = a.to(self.device)
 
             r = torch.FloatTensor(r).squeeze()
             r = r.to(self.device)
 
-            p_a = torch.FloatTensor(p_a).squeeze()
-            p_a = p_a.to(self.device)
-
-            R = torch.FloatTensor(R).squeeze()
-            R = R.to(self.device)
+            done = torch.FloatTensor(done).squeeze()
+            done = done.to(self.device)
 
             a_hat_target = self.actor_target(s)
-            q_hat_target = self.critic_target(sp, a_hat_target)
+            q_hat_target = self.critic_target(sp, a_hat_target).squeeze()
 
-            y = r + self.gamma * q_hat_target
-            y_hat = self.critic(s, a)
+            y = r + (1.0 - done) * self.gamma * q_hat_target
+            y_hat = self.critic(s, a).squeeze()
 
-            critic_loss = ((y_hat - y) ** 2).mean()
+            loss_critic = ((y_hat - y) ** 2).mean()
 
             self.optim_actor.zero_grad()
             self.optim_critic.zero_grad()
-            critic_loss.backward()
+            loss_critic.backward()
             self.optim_critic.step()
 
             a_hat = self.actor(s)
-            q_hat = self.critic(s, a_hat)
+            q_hat = self.critic(s, a_hat).squeeze()
 
-            actor_loss = -q_hat.mean()
+            loss_actor = -q_hat.mean()
 
             self.optim_actor.zero_grad()
             self.optim_critic.zero_grad()
-            actor_loss.backward()
+            loss_actor.backward()
             self.optim_actor.step()
 
-        tau = 0.001
+            losses_critic.append(loss_critic.item())
+            losses_actor.append(loss_actor.item())
 
-        for u, v in zip(self.actor.parameters(), self.actor_target.parameters()):
-            v.data.copy_(tau * v.data + (1 - tau) * u.data)
+            wandb.run.summary['step'] += 1
+            wandb.log({
+                'batch/actor': loss_actor.item(),
+                'batch/critic': loss_critic.item(),
+                },
+                step=wandb.run.summary['step'])
 
-        for u, v in zip(self.critic.parameters(), self.critic_target.parameters()):
-            v.data.copy_(tau * v.data + (1 - tau) * u.data)
+            for u, v in zip(self.actor_target.parameters(), self.actor.parameters()):
+                u.data.copy_((1 - self.tau) * u.data + self.tau * v.data)
 
-        return metrics
+            for u, v in zip(self.critic_target.parameters(), self.critic.parameters()):
+                u.data.copy_((1 - self.tau) * u.data + self.tau * v.data)
 
-    def get_policy(self):
-        return policy.DeepPolicy(self.actor)
+        return {
+                'epoch/actor': np.mean(losses_actor),
+                'epoch/critic': np.mean(losses_critic),
+                }
+
+    def get_policy(self, epoch):
+        return ContinuousPolicy(
+                self.actor,
+                np.clip((1 - epoch / 250) * self.eps, 0.0, 1.0))
 
 
 class Critic(torch.nn.Module):
@@ -129,8 +137,8 @@ class Critic(torch.nn.Module):
         x = F.relu(self.conv2(x))
         x = F.relu(self.conv3(x))
         x = F.relu(self.fc4(x.view(x.size(0), -1)))
-        x = torch.cat([x, a], 1)
 
+        x = torch.cat([x, a], 1)
         x = self.fc5(x)
 
         return x
@@ -155,7 +163,40 @@ class Actor(torch.nn.Module):
         x = F.relu(self.conv3(x))
         x = F.relu(self.fc4(x.view(x.size(0), -1)))
         x = self.fc5(x)
-        x = torch.tanh(x)
-        x[:,1] = (x[:,1] / 2.0) + 0.5
+
+        x[:, 0] = torch.tanh(x[:, 0])
+        x[:, 1] = torch.sigmoid(x[:, 1]) * 0.5
+        x[:, 2] = torch.sigmoid(x[:, 2])
 
         return x
+
+
+class ContinuousPolicy(BasePolicy):
+    def __init__(self, net, noise):
+        self.net = net
+        self.net.eval()
+        self.noise = noise
+
+    def __call__(self, s, v):
+        with torch.no_grad():
+            s = s.transpose(2, 0, 1)
+            s = torch.FloatTensor(s).unsqueeze(0).cuda()
+            a = self.net(s).squeeze()
+
+        if np.random.rand() < self.noise:
+            action_index = np.random.choice(list(range(16)))
+            binary = bin(action_index).lstrip('0b').rjust(4, '0')
+
+            action = pystk.Action()
+            action.steer = int(binary[0] == '1') * -1.0 + int(binary[1] == '1') * 1.0
+            action.acceleration = np.clip(5 + int(binary[2] == '1') * 20.0 - v, 0, 0.5)
+            action.drift = binary[3] == '1'
+
+            return action, -1, 1.0
+
+        action = pystk.Action()
+        action.steer = a[0].item()
+        action.acceleration = a[1].item()
+        action.drift = a[2].item() > 0.5
+
+        return action, -1, 1.0

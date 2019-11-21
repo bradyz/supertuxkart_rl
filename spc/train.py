@@ -14,18 +14,19 @@ from .ppo import PPO
 from .ddpg import DDPG
 
 
-N_WORKERS = 5
+N_WORKERS = 3
 
 
 class RaySampler(object):
     def __init__(self):
-        random_track = lambda: np.random.choice(["lighthouse"])
         random_track = lambda: np.random.choice(["lighthouse", "zengarden", "hacienda", "snowtuxpeak", "cornfield_crossing"])
-        tracks = ["lighthouse", "zengarden", "hacienda", "snowtuxpeak", "cornfield_crossing"]
+        random_track = lambda: np.random.choice(["lighthouse"])
+        self.rollouts = [RayRollout.remote(random_track()) for _ in range(N_WORKERS)]
 
-        self.rollouts = [RayRollout.remote(track) for track in tracks]
+        # tracks = ["lighthouse", "zengarden", "hacienda", "snowtuxpeak", "cornfield_crossing"]
+        # self.rollouts = [RayRollout.remote(track) for track in tracks]
 
-    def get_samples(self, agent, max_frames=10000, max_step=2000, gamma=1.0, frame_skip=0, **kwargs):
+    def get_samples(self, agent, max_frames=10000, max_step=500, gamma=1.0, frame_skip=0, **kwargs):
         tick = time.time()
         total_frames = 0
         returns = list()
@@ -40,10 +41,11 @@ class RaySampler(object):
                             agent,
                             max_step=max_step, gamma=gamma, frame_skip=frame_skip))
 
-            batch_ros = [ray.get(ro) for ro in batch_ros]
+            batch_ros = ray.get(batch_ros)
+            # batch_ros = [ray.get(ro) for ro in batch_ros]
 
             if len(video_rollouts) < 64:
-                video_rollouts.extend([ro for ro, ret in batch_ros])
+                video_rollouts.extend([ro for ro, ret in batch_ros if len(ro) > 0])
 
             total_frames += sum(len(ro) * (frame_skip + 1) for ro, ret in batch_ros)
             returns.extend([ret for ro, ret in batch_ros])
@@ -56,7 +58,7 @@ class RaySampler(object):
         print('Count: %d' % (total_frames))
         print('Episodes: %d' % (len(returns)))
         print('Time: %.2f' % clock)
-        print('Return: %.2f' % np.mean(returns))
+        print('Return: %.3f' % np.mean(returns))
 
         wandb.run.summary['frames'] = wandb.run.summary.get('frames', 0) + total_frames
         wandb.run.summary['episodes'] = wandb.run.summary.get('episodes', 0) + len(returns)
@@ -95,6 +97,8 @@ def main(config):
                 for data in rollout:
                     replay.add(data)
 
+        print([x.r[0] for x in rollout])
+
         metrics = trainer.train(replay)
 
         wandb.log(metrics, step=wandb.run.summary['step'])
@@ -107,10 +111,12 @@ if __name__ == '__main__':
     # Optimizer args.
     parser.add_argument('--algorithm', type=str, default='reinforce')
     parser.add_argument('--lr', type=float, default=1e-4)
+    parser.add_argument('--lr_1', type=float, default=1e-4)
     parser.add_argument('--iterations', type=int, default=100)
     parser.add_argument('--batch_size', type=int, default=512)
     parser.add_argument('--max_frames', type=int, default=5000)
     parser.add_argument('--frame_skip', type=int, default=0)
+    parser.add_argument('--tau', type=float, default=0.01)
     parser.add_argument('--gamma', type=float, default=0.9)
     parser.add_argument('--eps', type=float, default=0.1)
     parser.add_argument('--clip', type=float, default=0.1)
@@ -128,10 +134,12 @@ if __name__ == '__main__':
             'device': torch.device('cuda' if torch.cuda.is_available() else 'cpu'),
 
             'batch_size': parsed.batch_size,
-            'eps': parsed.eps,
-            'lr': parsed.lr,
             'iterations': parsed.iterations,
+            'lr': parsed.lr,
+            'lr_1': parsed.lr_1,
             'clip': parsed.clip,
+            'tau': parsed.tau,
+            'eps': parsed.eps,
             'importance_sampling': parsed.importance_sampling,
             }
 

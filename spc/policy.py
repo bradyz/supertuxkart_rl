@@ -2,7 +2,6 @@ from typing import Dict
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 import pystk
 import cv2
 
@@ -13,29 +12,6 @@ N_ACTIONS = int(2 ** 4)
 class BasePolicy:
     def __call__(self, m: Dict):
         raise NotImplementedError("BasePolicy.__call__")
-
-
-class DeepNet(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-
-        self.norm = torch.nn.BatchNorm2d(3)
-        self.conv1 = torch.nn.Conv2d(3, 32, kernel_size=8, stride=4)
-        self.conv2 = torch.nn.Conv2d(32, 64, 4, 2)
-        self.conv3 = torch.nn.Conv2d(64, 64, 3, 1)
-
-        self.fc4 = torch.nn.Linear(4 * 4 * 64, 512)
-        self.fc5 = torch.nn.Linear(512, N_ACTIONS)
-
-    def forward(self, x):
-        x = self.norm(x)
-        x = F.relu(self.conv1(x))
-        x = F.relu(self.conv2(x))
-        x = F.relu(self.conv3(x))
-        x = F.relu(self.fc4(x.view(x.size(0), -1)))
-        x = self.fc5(x)
-
-        return x
 
 
 class DiscretePolicy(BasePolicy):

@@ -198,7 +198,7 @@ class ContinuousPolicy(BasePolicy):
         drift = a[2].item()
 
         action = [
-                steer + self.noise * ou(steer, 0.0, 0.25, 0.5),
+                steer + self.noise * ou(steer, 0.0, 0.2, 0.2),
                 velocity + self.noise * ou(velocity, 2.5, 0.5, 2.5),
                 drift + self.noise * np.random.randn() * 0.50]
 

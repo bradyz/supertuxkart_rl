@@ -61,6 +61,7 @@ class RaySampler(object):
 
         wandb.run.summary['frames'] = wandb.run.summary.get('frames', 0) + total_frames
         wandb.run.summary['episodes'] = wandb.run.summary.get('episodes', 0) + len(returns)
+        wandb.run.summary['return'] = max(wandb.run.summary.get('return', 0), np.mean(returns))
 
         wandb.log({
             'video': [wandb.Video(make_video(video_rollouts), format='mp4', fps=20)],
@@ -104,7 +105,7 @@ def main(config):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--max_epoch', type=int, default=10000)
+    parser.add_argument('--max_epoch', type=int, default=500)
 
     # Optimizer args.
     parser.add_argument('--algorithm', type=str, default='reinforce')

@@ -91,6 +91,15 @@ class Rollout(object):
             v = np.linalg.norm(state.karts[0].velocity)
             action, action_i, p_action = policy(s, v)
 
+            if isinstance(action, pystk.Action):
+                action_raw = [action.steer, action.acceleration, action.drift]
+            else:
+                action_raw = action
+                action = pystk.Action()
+                action.steer = action_raw[0]
+                action.acceleration = 10.0 - action_raw[1]
+                action.drift = action_raw[2] > 0.5
+
             for _ in range(1 + frame_skip):
                 self.race.step(action)
                 self.track.update()
@@ -100,27 +109,27 @@ class Rollout(object):
 
             s_p = np.array(self.race.render_data[0].image)
 
-            d_new = state.karts[0].distance_down_track
+            d_new = min(state.karts[0].distance_down_track, d + 5.0)
             node_idx = np.searchsorted(
                     self.track.path_distance[:, 1],
                     d_new % self.track.path_distance[-1, 1]) % len(self.track.path_nodes)
             a_b = self.track.path_nodes[node_idx]
 
             distance = point_from_line(state.karts[0].location, a_b[0], a_b[1])
-            mult = int(distance < 9.0) * 2.0 - 1.0
+            mult = int(distance < 6.0) * 2.0 - 1.0
             distance_traveled = get_distance(d_new, d, self.track.path_distance[-1, 1])
             gain = distance_traveled if distance_traveled > 0 else 0
 
             traveled.append(gain)
-            off_track.append(distance > 9.0)
+            off_track.append(distance > 6.0)
 
             r_total = max(r_total, d_new * mult)
-            r = np.clip(0.5 * max(mult * gain, 0) + 0.5 * mult, -1.0, 0.60)
+            r = np.clip(0.5 * max(mult * gain, 0) + 0.5 * mult, -1.0, 1.0)
 
             result.append(
                     Data(
                         s.copy(),
-                        np.float32([action.steer, action.acceleration, action.drift]),
+                        np.float32(action_raw),
                         np.uint8([action_i]), np.float32([p_action]),
                         np.float32([r]), s_p.copy(),
                         np.float32([np.nan]),
@@ -161,6 +170,5 @@ if __name__ == "__main__":
     rollout = Rollout('lighthouse')
 
     episode = rollout.rollout(
-            # policy.RewardPolicy(Reward),
             policy.HumanPolicy(),
             max_step=1000000)

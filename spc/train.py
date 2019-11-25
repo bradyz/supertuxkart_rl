@@ -42,7 +42,6 @@ class RaySampler(object):
                             max_step=max_step, gamma=gamma, frame_skip=frame_skip))
 
             batch_ros = ray.get(batch_ros)
-            # batch_ros = [ray.get(ro) for ro in batch_ros]
 
             if len(video_rollouts) < 64:
                 video_rollouts.extend([ro for ro, ret in batch_ros if len(ro) > 0])
@@ -98,7 +97,6 @@ def main(config):
                     replay.add(data)
 
         print([x.r[0] for x in rollout])
-
         metrics = trainer.train(replay)
 
         wandb.log(metrics, step=wandb.run.summary['step'])
@@ -115,6 +113,7 @@ if __name__ == '__main__':
     parser.add_argument('--iterations', type=int, default=100)
     parser.add_argument('--batch_size', type=int, default=512)
     parser.add_argument('--max_frames', type=int, default=5000)
+    parser.add_argument('--max_step', type=int, default=500)
     parser.add_argument('--frame_skip', type=int, default=0)
     parser.add_argument('--tau', type=float, default=0.01)
     parser.add_argument('--gamma', type=float, default=0.9)
@@ -128,6 +127,7 @@ if __name__ == '__main__':
             'algorithm': parsed.algorithm,
             'frame_skip': parsed.frame_skip,
             'max_frames': parsed.max_frames,
+            'max_step': parsed.max_step,
             'gamma': parsed.gamma,
 
             'max_epoch': parsed.max_epoch,

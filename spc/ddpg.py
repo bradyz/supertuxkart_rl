@@ -52,7 +52,7 @@ class DDPG(object):
 
         for i in range(self.iterations):
             indices = np.random.choice(len(replay), self.batch_size)
-            s, a, _, _, r, sp, _, done = replay[indices]
+            s, a, _, _, r, sp, R, done = replay[indices]
 
             s = torch.FloatTensor(s.transpose(0, 3, 1, 2))
             s = s.to(self.device)
@@ -66,6 +66,9 @@ class DDPG(object):
             r = torch.FloatTensor(r).squeeze()
             r = r.to(self.device)
 
+            R = torch.FloatTensor(R).squeeze()
+            R = R.to(self.device)
+
             done = torch.FloatTensor(done).squeeze()
             done = done.to(self.device)
 
@@ -75,6 +78,7 @@ class DDPG(object):
             y = r + (1.0 - done) * self.gamma * q_hat_target
             y_hat = self.critic(s, a).squeeze()
 
+            # loss_critic = ((y_hat - y) ** 2).mean() + ((y_hat - R) ** 2).mean()
             loss_critic = ((y_hat - y) ** 2).mean()
 
             self.optim_actor.zero_grad()
@@ -92,6 +96,12 @@ class DDPG(object):
             loss_actor.backward()
             self.optim_actor.step()
 
+            for u, v in zip(self.actor_target.parameters(), self.actor.parameters()):
+                u.data.copy_((1 - self.tau) * u.data + self.tau * v.data)
+
+            for u, v in zip(self.critic_target.parameters(), self.critic.parameters()):
+                u.data.copy_((1 - self.tau) * u.data + self.tau * v.data)
+
             losses_critic.append(loss_critic.item())
             losses_actor.append(loss_actor.item())
 
@@ -102,21 +112,16 @@ class DDPG(object):
                 },
                 step=wandb.run.summary['step'])
 
-            for u, v in zip(self.actor_target.parameters(), self.actor.parameters()):
-                u.data.copy_((1 - self.tau) * u.data + self.tau * v.data)
-
-            for u, v in zip(self.critic_target.parameters(), self.critic.parameters()):
-                u.data.copy_((1 - self.tau) * u.data + self.tau * v.data)
-
         return {
                 'epoch/actor': np.mean(losses_actor),
                 'epoch/critic': np.mean(losses_critic),
                 }
 
     def get_policy(self, epoch):
-        return ContinuousPolicy(
-                self.actor,
-                np.clip((1 - epoch / 250) * self.eps, 0.0, 1.0))
+        noise = np.clip((1 - epoch / 5000) * self.eps, 0.0, 1.0)
+        wandb.log({'epoch/eps': noise}, step=wandb.run.summary['step'])
+
+        return ContinuousPolicy(self.actor, noise)
 
 
 class Critic(torch.nn.Module):
@@ -124,6 +129,7 @@ class Critic(torch.nn.Module):
         super().__init__()
 
         self.norm = torch.nn.BatchNorm2d(3)
+        self.norm_a = torch.nn.BatchNorm1d(n_actions)
         self.conv1 = torch.nn.Conv2d(3, 32, kernel_size=8, stride=4)
         self.conv2 = torch.nn.Conv2d(32, 64, 4, 2)
         self.conv3 = torch.nn.Conv2d(64, 64, 3, 1)
@@ -138,7 +144,7 @@ class Critic(torch.nn.Module):
         x = F.relu(self.conv3(x))
         x = F.relu(self.fc4(x.view(x.size(0), -1)))
 
-        x = torch.cat([x, a], 1)
+        x = torch.cat([x, self.norm_a(a)], 1)
         x = self.fc5(x)
 
         return x
@@ -165,10 +171,14 @@ class Actor(torch.nn.Module):
         x = self.fc5(x)
 
         x[:, 0] = torch.tanh(x[:, 0])
-        x[:, 1] = torch.sigmoid(x[:, 1]) * 0.5
+        x[:, 1] = torch.sigmoid(x[:, 1]) * 10.0
         x[:, 2] = torch.sigmoid(x[:, 2])
 
         return x
+
+
+def ou(x, mu, theta, sigma):
+    return theta * (mu - x) + sigma * np.random.randn()
 
 
 class ContinuousPolicy(BasePolicy):
@@ -183,20 +193,13 @@ class ContinuousPolicy(BasePolicy):
             s = torch.FloatTensor(s).unsqueeze(0).cuda()
             a = self.net(s).squeeze()
 
-        if np.random.rand() < self.noise:
-            action_index = np.random.choice(list(range(16)))
-            binary = bin(action_index).lstrip('0b').rjust(4, '0')
+        steer = a[0].item()
+        velocity = a[1].item()
+        drift = a[2].item()
 
-            action = pystk.Action()
-            action.steer = int(binary[0] == '1') * -1.0 + int(binary[1] == '1') * 1.0
-            action.acceleration = np.clip(5 + int(binary[2] == '1') * 20.0 - v, 0, 0.5)
-            action.drift = binary[3] == '1'
-
-            return action, -1, 1.0
-
-        action = pystk.Action()
-        action.steer = a[0].item()
-        action.acceleration = a[1].item()
-        action.drift = a[2].item() > 0.5
+        action = [
+                steer + self.noise * ou(steer, 0.0, 0.25, 0.5),
+                velocity + self.noise * ou(velocity, 5.0, 0.5, 2.5),
+                drift + self.noise * np.random.randn() * 0.50]
 
         return action, -1, 1.0

@@ -171,7 +171,7 @@ class Actor(torch.nn.Module):
         x = self.fc5(x)
 
         x[:, 0] = torch.tanh(x[:, 0])
-        x[:, 1] = torch.sigmoid(x[:, 1]) * 10.0
+        x[:, 1] = torch.sigmoid(x[:, 1]) * 5.0
         x[:, 2] = torch.sigmoid(x[:, 2])
 
         return x
@@ -199,7 +199,7 @@ class ContinuousPolicy(BasePolicy):
 
         action = [
                 steer + self.noise * ou(steer, 0.0, 0.25, 0.5),
-                velocity + self.noise * ou(velocity, 5.0, 0.5, 2.5),
+                velocity + self.noise * ou(velocity, 2.5, 0.5, 2.5),
                 drift + self.noise * np.random.randn() * 0.50]
 
         return action, -1, 1.0

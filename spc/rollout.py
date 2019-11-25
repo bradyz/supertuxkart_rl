@@ -97,7 +97,7 @@ class Rollout(object):
                 action_raw = action
                 action = pystk.Action()
                 action.steer = action_raw[0]
-                action.acceleration = 10.0 - action_raw[1]
+                action.acceleration = action_raw[1] - v
                 action.drift = action_raw[2] > 0.5
 
             for _ in range(1 + frame_skip):

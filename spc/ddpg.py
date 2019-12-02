@@ -1,13 +1,13 @@
-import pystk
 import wandb
 import numpy as np
 import torch
 import torch.nn.functional as F
 
-from .policy import BasePolicy
+from .policy import BasePolicy, DiscretePolicy
 
 
 N_ACTIONS = 3
+# N_ACTIONS = 16
 
 
 class DDPG(object):
@@ -21,6 +21,8 @@ class DDPG(object):
         self.iterations = iterations
 
         self.device = device
+
+        self.actions = torch.eye(N_ACTIONS).to(self.device)
 
         self.actor = Actor(N_ACTIONS)
         self.actor.to(self.device)
@@ -47,12 +49,15 @@ class DDPG(object):
         self.critic.to(self.device)
         self.critic.train()
 
+        # self.actor_target.eval()
+        # self.critic_target.eval()
+
         losses_actor = list()
         losses_critic = list()
 
         for i in range(self.iterations):
             indices = np.random.choice(len(replay), self.batch_size)
-            s, a, _, _, r, sp, R, done = replay[indices]
+            s, a, a_i, _, r, sp, R, done = replay[indices]
 
             s = torch.FloatTensor(s.transpose(0, 3, 1, 2))
             s = s.to(self.device)
@@ -63,6 +68,9 @@ class DDPG(object):
             a = torch.FloatTensor(a).squeeze()
             a = a.to(self.device)
 
+            a_i = torch.LongTensor(a_i).squeeze()
+            a_i = a_i.to(self.device)
+
             r = torch.FloatTensor(r).squeeze()
             r = r.to(self.device)
 
@@ -72,38 +80,34 @@ class DDPG(object):
             done = torch.FloatTensor(done).squeeze()
             done = done.to(self.device)
 
-            a_hat_target = self.actor_target(s)
-            q_hat_target = self.critic_target(sp, a_hat_target).squeeze()
+            q_hat_target = self.critic_target(sp, self.actor_target(sp)).squeeze().detach()
 
+            # y_hat = self.critic(s, self.actions[a_i]).squeeze()
             y = r + (1.0 - done) * self.gamma * q_hat_target
             y_hat = self.critic(s, a).squeeze()
 
             # loss_critic = ((y_hat - y) ** 2).mean() + ((y_hat - R) ** 2).mean()
             loss_critic = ((y_hat - y) ** 2).mean()
 
-            self.optim_actor.zero_grad()
+            # a_hat = torch.nn.functional.softmax(self.actor(s), dim=-1)
+            loss_actor = -self.critic(s, self.actor(s)).squeeze().mean()
+
             self.optim_critic.zero_grad()
             loss_critic.backward()
             self.optim_critic.step()
 
-            a_hat = self.actor(s)
-            q_hat = self.critic(s, a_hat).squeeze()
-
-            loss_actor = -q_hat.mean()
-
             self.optim_actor.zero_grad()
-            self.optim_critic.zero_grad()
             loss_actor.backward()
             self.optim_actor.step()
+
+            losses_critic.append(loss_critic.item())
+            losses_actor.append(loss_actor.item())
 
             for u, v in zip(self.actor_target.parameters(), self.actor.parameters()):
                 u.data.copy_((1 - self.tau) * u.data + self.tau * v.data)
 
             for u, v in zip(self.critic_target.parameters(), self.critic.parameters()):
                 u.data.copy_((1 - self.tau) * u.data + self.tau * v.data)
-
-            losses_critic.append(loss_critic.item())
-            losses_actor.append(loss_actor.item())
 
             wandb.run.summary['step'] += 1
             wandb.log({
@@ -118,10 +122,16 @@ class DDPG(object):
                 }
 
     def get_policy(self, epoch):
-        noise = np.clip((1 - epoch / 5000) * self.eps, 0.0, 1.0)
+        noise = np.clip((1 - epoch / 1000) * self.eps, 0.1, 1.0)
         wandb.log({'epoch/eps': noise}, step=wandb.run.summary['step'])
 
         return ContinuousPolicy(self.actor, noise)
+
+    # def get_policy(self, epoch):
+        # noise = np.clip((1 - epoch / 1000) * self.eps, 0.10, 1.0)
+        # wandb.log({'epoch/eps': noise}, step=wandb.run.summary['step'])
+
+        # return DiscretePolicy(self.actor, n_actions=N_ACTIONS, eps=noise)
 
 
 class Critic(torch.nn.Module):
@@ -145,6 +155,7 @@ class Critic(torch.nn.Module):
         x = F.relu(self.fc4(x.view(x.size(0), -1)))
 
         x = torch.cat([x, self.norm_a(a)], 1)
+        # x = torch.cat([x, a], 1)
         x = self.fc5(x)
 
         return x
@@ -171,7 +182,7 @@ class Actor(torch.nn.Module):
         x = self.fc5(x)
 
         x[:, 0] = torch.tanh(x[:, 0])
-        x[:, 1] = torch.sigmoid(x[:, 1]) * 5.0
+        x[:, 1] = torch.sigmoid(x[:, 1]) * 10.0 + 2.5
         x[:, 2] = torch.sigmoid(x[:, 2])
 
         return x
@@ -198,8 +209,8 @@ class ContinuousPolicy(BasePolicy):
         drift = a[2].item()
 
         action = [
-                steer + self.noise * ou(steer, 0.0, 0.2, 0.2),
-                velocity + self.noise * ou(velocity, 2.5, 0.5, 2.5),
+                steer + self.noise * ou(steer, 0.0, 0.0, 1.0),
+                velocity + self.noise * ou(velocity, 0.0, 0.0, 5.0),
                 drift + self.noise * np.random.randn() * 0.50]
 
         return action, -1, 1.0

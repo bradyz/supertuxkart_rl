@@ -95,9 +95,10 @@ class Rollout(object):
                 action_raw = [action.steer, action.acceleration, action.drift]
             else:
                 action_raw = action
+
                 action = pystk.Action()
                 action.steer = action_raw[0]
-                action.acceleration = action_raw[1] - v
+                action.acceleration = np.clip(action_raw[1] - v, 0, np.inf)
                 action.drift = action_raw[2] > 0.5
 
             for _ in range(1 + frame_skip):
@@ -116,9 +117,9 @@ class Rollout(object):
             a_b = self.track.path_nodes[node_idx]
 
             distance = point_from_line(state.karts[0].location, a_b[0], a_b[1])
-            mult = int(distance < 6.0) * 2.0 - 1.0
             distance_traveled = get_distance(d_new, d, self.track.path_distance[-1, 1])
             gain = distance_traveled if distance_traveled > 0 else 0
+            mult = int(distance < 6.0)
 
             traveled.append(gain)
             off_track.append(distance > 6.0)

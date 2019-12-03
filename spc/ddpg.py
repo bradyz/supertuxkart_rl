@@ -172,6 +172,7 @@ class Actor(torch.nn.Module):
 
         self.fc4 = torch.nn.Linear(4 * 4 * 64, 512)
         self.fc5 = torch.nn.Linear(512, n_actions)
+        self.bn = torch.nn.BatchNorm1d(n_actions)
 
     def forward(self, x):
         x = self.norm(x)
@@ -179,9 +180,9 @@ class Actor(torch.nn.Module):
         x = F.relu(self.conv2(x))
         x = F.relu(self.conv3(x))
         x = F.relu(self.fc4(x.view(x.size(0), -1)))
-        x = self.fc5(x)
+        x = self.bn(self.fc5(x))
 
-        x[:, 0] = torch.tanh(x[:, 0])
+        x[:, 0] = torch.tanh(x[:, 0]) * 2.0
         x[:, 1] = torch.sigmoid(x[:, 1]) * 10.0 + 2.5
         x[:, 2] = torch.sigmoid(x[:, 2])
 
@@ -195,13 +196,14 @@ def ou(x, mu, theta, sigma):
 class ContinuousPolicy(BasePolicy):
     def __init__(self, net, noise):
         self.net = net
-        self.net.eval()
+        self.net.cpu().eval()
+
         self.noise = noise
 
     def __call__(self, s, v):
         with torch.no_grad():
             s = s.transpose(2, 0, 1)
-            s = torch.FloatTensor(s).unsqueeze(0).cuda()
+            s = torch.FloatTensor(s).unsqueeze(0).cpu()
             a = self.net(s).squeeze()
 
         steer = a[0].item()

@@ -14,17 +14,16 @@ from .ppo import PPO
 from .ddpg import DDPG
 
 
-N_WORKERS = 3
+N_WORKERS = 2
+MAPS = ["lighthouse", "zengarden", "hacienda", "snowtuxpeak", "cornfield_crossing"]
+MAPS = ["lighthouse"]
 
 
 class RaySampler(object):
     def __init__(self):
-        random_track = lambda: np.random.choice(["lighthouse", "zengarden", "hacienda", "snowtuxpeak", "cornfield_crossing"])
-        random_track = lambda: np.random.choice(["lighthouse"])
-        self.rollouts = [RayRollout.remote(random_track()) for _ in range(N_WORKERS)]
+        random_track = lambda: np.random.choice(MAPS)
 
-        # tracks = ["lighthouse", "zengarden", "hacienda", "snowtuxpeak", "cornfield_crossing"]
-        # self.rollouts = [RayRollout.remote(track) for track in tracks]
+        self.rollouts = [RayRollout.remote(random_track()) for _ in range(N_WORKERS)]
 
     def get_samples(self, agent, max_frames=10000, max_step=500, gamma=1.0, frame_skip=0, **kwargs):
         tick = time.time()
@@ -32,7 +31,7 @@ class RaySampler(object):
         returns = list()
         video_rollouts = list()
 
-        while total_frames <= max_frames:
+        while total_frames <= max_frames // 4:
             batch_ros = list()
 
             for rollout in self.rollouts:
@@ -86,11 +85,10 @@ def main(config):
             }[config['algorithm']](**config)
 
     sampler = RaySampler()
+    replay = ReplayBuffer(config['max_frames'])
 
     for epoch in range(config['max_epoch']+1):
         wandb.run.summary['epoch'] = epoch
-
-        replay = ReplayBuffer(config['max_frames'])
 
         for rollout_batch in sampler.get_samples(trainer.get_policy(epoch), **config):
             for rollout, _ in rollout_batch:
@@ -144,6 +142,8 @@ if __name__ == '__main__':
             'importance_sampling': parsed.importance_sampling,
             }
 
-    ray.init(logging_level=40, num_cpus=N_WORKERS, num_gpus=1)
+    ray.init(logging_level=40, num_gpus=1, num_cpus=8)
 
     main(config)
+
+    # ray.timeline(filename='tmp2.json')

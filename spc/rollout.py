@@ -162,7 +162,7 @@ class Rollout(object):
         pystk.clean()
 
 
-@ray.remote(num_cpus=1, num_gpus=0.15)
+@ray.remote(num_cpus=1, num_gpus=0.20)
 class RayRollout(Rollout):
     pass
 

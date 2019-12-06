@@ -3,6 +3,7 @@ from collections import deque
 import pystk
 import ray
 import numpy as np
+import torch; torch.set_num_threads(1)
 
 from . import policy
 from .replay_buffer import Data
@@ -162,7 +163,7 @@ class Rollout(object):
         pystk.clean()
 
 
-@ray.remote(num_cpus=1, num_gpus=0.20)
+@ray.remote(num_cpus=1, num_gpus=0.10)
 class RayRollout(Rollout):
     pass
 

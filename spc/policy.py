@@ -17,7 +17,7 @@ class BasePolicy:
 class DiscretePolicy(BasePolicy):
     def __init__(self, net, n_actions, eps):
         self.net = net
-        self.net.eval()
+        self.net.eval().cpu()
 
         self.n_actions = n_actions
         self.eps = eps
@@ -25,7 +25,7 @@ class DiscretePolicy(BasePolicy):
     def __call__(self, s, v):
         with torch.no_grad():
             s = s.transpose(2, 0, 1)
-            s = torch.FloatTensor(s).unsqueeze(0).cuda()
+            s = torch.FloatTensor(s).unsqueeze(0).cpu()
             m = torch.distributions.Categorical(logits=self.net(s))
 
         if np.random.rand() < self.eps:

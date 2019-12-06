@@ -14,7 +14,7 @@ from .ppo import PPO
 from .ddpg import DDPG
 
 
-N_WORKERS = 2
+N_WORKERS = 8
 MAPS = ["lighthouse", "zengarden", "hacienda", "snowtuxpeak", "cornfield_crossing"]
 MAPS = ["lighthouse"]
 
@@ -31,7 +31,7 @@ class RaySampler(object):
         returns = list()
         video_rollouts = list()
 
-        while total_frames <= max_frames // 4:
+        while total_frames <= max_frames:
             batch_ros = list()
 
             for rollout in self.rollouts:

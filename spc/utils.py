@@ -1,7 +1,7 @@
 import numpy as np
 
 
-def make_video(rollouts):
+def make_video(rollouts, m=4):
     videos = list()
     max_t = 0
 
@@ -17,15 +17,15 @@ def make_video(rollouts):
     videos.sort(key=lambda x: x.shape[0], reverse=True)
 
     _, c, h, w = videos[0].shape
-    full = np.zeros((max_t, c, h * 8, w * 8), dtype=np.uint8)
+    full = np.zeros((max_t, c, h * m, w * m), dtype=np.uint8)
 
-    for i in range(8):
-        for j in range(8):
-            if i * 8 + j >= len(videos):
+    for i in range(m):
+        for j in range(m):
+            if i * m + j >= len(videos):
                 continue
 
-            n = videos[i * 8 + j].shape[0]
-            full[:n, :, i * h: i * h + h, j * w: j * w + w] = videos[i * 8 + j]
-            full[n:, :, i * h: i * h + h, j * w: j * w + w] = videos[i * 8 + j][-1][None]
+            n = videos[i * m + j].shape[0]
+            full[:n, :, i * h: i * h + h, j * w: j * w + w] = videos[i * m + j]
+            full[n:, :, i * h: i * h + h, j * w: j * w + w] = videos[i * m + j][-1][None]
 
     return full

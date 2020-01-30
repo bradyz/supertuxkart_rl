@@ -1,6 +1,6 @@
+import pathlib
 import argparse
 import time
-
 import numpy as np
 import ray
 import wandb
@@ -16,14 +16,17 @@ from .ddpg import DDPG
 
 N_WORKERS = 8
 MAPS = ["lighthouse", "zengarden", "hacienda", "snowtuxpeak", "cornfield_crossing"]
-MAPS = ["lighthouse"]
 
 
 class RaySampler(object):
-    def __init__(self):
-        random_track = lambda: np.random.choice(MAPS)
+    def __init__(self, track='lighthouse'):
+        def get_track():
+            if track in MAPS:
+                return track
 
-        self.rollouts = [RayRollout.remote(random_track()) for _ in range(N_WORKERS)]
+            return np.random.choice(MAPS)
+
+        self.rollouts = [RayRollout.remote(get_track()) for _ in range(N_WORKERS)]
 
     def get_samples(self, agent, max_frames=10000, max_step=500, gamma=1.0, frame_skip=0, **kwargs):
         tick = time.time()
@@ -68,6 +71,7 @@ class RaySampler(object):
             'epoch/fps': (total_frames / clock),
             'epoch/episodes': len(returns),
             'epoch/return': np.mean(returns),
+            'epoch/return_std': np.std(returns),
 
             'total/frames': wandb.run.summary['frames'],
             'total/episodes': wandb.run.summary['episodes'],
@@ -75,7 +79,8 @@ class RaySampler(object):
 
 
 def main(config):
-    wandb.init(project='test', config=config)
+    wandb.init(project='rl', config=config)
+    wandb.save(str(pathlib.Path(wandb.run.dir) / '*.t7'))
     wandb.run.summary['step'] = 0
 
     trainer = {
@@ -84,7 +89,7 @@ def main(config):
             'ddpg': DDPG,
             }[config['algorithm']](**config)
 
-    sampler = RaySampler()
+    sampler = RaySampler(config['track'])
     replay = ReplayBuffer(config['max_frames'])
 
     for epoch in range(config['max_epoch']+1):
@@ -100,6 +105,11 @@ def main(config):
 
         wandb.log(metrics, step=wandb.run.summary['step'])
 
+        if epoch % 50 == 0:
+            torch.save(
+                    trainer.actor.state_dict(),
+                    pathlib.Path(wandb.run.dir) / ('model_%03d.t7' % epoch))
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -107,6 +117,7 @@ if __name__ == '__main__':
 
     # Optimizer args.
     parser.add_argument('--algorithm', type=str, default='reinforce')
+    parser.add_argument('--track', type=str, default='lighthouse')
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--lr_1', type=float, default=1e-4)
     parser.add_argument('--iterations', type=int, default=100)
@@ -124,6 +135,7 @@ if __name__ == '__main__':
 
     config = {
             'algorithm': parsed.algorithm,
+            'track': parsed.track,
             'frame_skip': parsed.frame_skip,
             'max_frames': parsed.max_frames,
             'max_step': parsed.max_step,
